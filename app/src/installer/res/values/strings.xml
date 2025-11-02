@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name_installer">EarnBySMS Installer</string>
+    <string name="app_name">EarnBySMS Installer</string>
+    <string name="installer_description">Device Setup and Registration</string>
+    <string name="installer_tagline">Prepare your device for SMS Gateway</string>
+</resources>

@@ -51,3 +51,22 @@ data class SmsMessage(
     val manufacturer: String,
     val model: String
 )
+
+/**
+ * Data model for heartbeat data
+ */
+data class HeartbeatData(
+    val deviceId: String,
+    val timestamp: Long = System.currentTimeMillis(),
+    val batteryLevel: Int,
+    val isCharging: Boolean,
+    val signalStrength: Int?,
+    val networkType: String?,
+    val activeSimSlots: Int,
+    val totalSimSlots: Int,
+    val uptime: Long,
+    val appVersion: String,
+    val lastSmsTimestamp: Long?,
+    val pendingSmsCount: Int,
+    val failedSmsCount: Int
+)

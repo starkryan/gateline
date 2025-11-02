@@ -18,6 +18,10 @@ android {
         versionName = "1.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+
+        // Build config fields for variant identification
+        buildConfigField("boolean", "IS_INSTALLER_VARIANT", "false")
+        buildConfigField("boolean", "IS_MAINAPP_VARIANT", "false")
     }
 
     buildTypes {
@@ -29,6 +33,41 @@ android {
             )
         }
     }
+
+    flavorDimensions += "appType"
+    productFlavors {
+        create("installer") {
+            dimension = "appType"
+            applicationIdSuffix = ".installer"
+            versionNameSuffix = "-installer"
+
+            // Installer specific configuration
+            buildConfigField("boolean", "IS_INSTALLER_VARIANT", "true")
+            buildConfigField("boolean", "IS_MAINAPP_VARIANT", "false")
+
+            // Enable only necessary permissions for installer
+            manifestPlaceholders["appPermission"] = "android.permission.READ_PHONE_STATE"
+
+            // ProGuard rules for installer
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules-installer.pro")
+        }
+
+        create("mainapp") {
+            dimension = "appType"
+            applicationIdSuffix = ".mainapp"
+            versionNameSuffix = "-mainapp"
+
+            // Main app specific configuration
+            buildConfigField("boolean", "IS_INSTALLER_VARIANT", "false")
+            buildConfigField("boolean", "IS_MAINAPP_VARIANT", "true")
+
+            // Enable all permissions for main app
+            manifestPlaceholders["appPermission"] = "android.permission.READ_SMS"
+
+            // ProGuard rules for main app
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules-mainapp.pro")
+        }
+    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
@@ -38,6 +77,7 @@ android {
     }
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 

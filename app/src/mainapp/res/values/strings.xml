@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name_mainapp">EarnBySMS Gateway</string>
+    <string name="app_name">EarnBySMS Gateway</string>
+    <string name="mainapp_description">SMS Gateway and Forwarding</string>
+    <string name="mainapp_tagline">Real-time SMS message forwarding</string>
+</resources>
