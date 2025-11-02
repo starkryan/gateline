@@ -242,11 +242,34 @@ class AppUpdateDownloader(private val context: Context) {
     }
 
     /**
-     * Triggers APK installation using PackageInstaller API
+     * Triggers APK installation using modern PackageInstaller API
      */
     fun installApk(apkFile: File): Boolean {
         return try {
             Log.d(TAG, "Starting APK installation: ${apkFile.absolutePath}")
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Modern approach for Android 8.0+ using PackageInstaller API
+                installApkModern(apkFile)
+            } else {
+                // Fallback for older Android versions
+                installApkLegacy(apkFile)
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during APK installation", e)
+            _downloadState.value = DownloadState.Error("Installation failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Modern APK installation for Android 8.0+ using PackageInstaller API
+     */
+    @Suppress("DEPRECATION")
+    private fun installApkModern(apkFile: File): Boolean {
+        return try {
+            Log.d(TAG, "Using modern PackageInstaller API")
 
             // Get content URI using FileProvider
             val apkUri = FileProvider.getUriForFile(
@@ -255,7 +278,49 @@ class AppUpdateDownloader(private val context: Context) {
                 apkFile
             )
 
-            // Create install intent
+            // Create install intent with proper flags
+            val installIntent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
+                data = apkUri
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                putExtra(Intent.EXTRA_INSTALLER_PACKAGE_NAME, context.packageName)
+            }
+
+            // Check if package manager can handle the intent
+            if (installIntent.resolveActivity(context.packageManager) != null) {
+                context.startActivity(installIntent)
+                _downloadState.value = DownloadState.Installing
+                Log.d(TAG, "Modern installation intent sent successfully")
+                true
+            } else {
+                Log.e(TAG, "No app can handle modern APK installation")
+                _downloadState.value = DownloadState.Error("Cannot install APK - no compatible installer found")
+                false
+            }
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during modern APK installation", e)
+            _downloadState.value = DownloadState.Error("Modern installation failed: ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Legacy APK installation for Android versions below 8.0
+     */
+    private fun installApkLegacy(apkFile: File): Boolean {
+        return try {
+            Log.d(TAG, "Using legacy ACTION_VIEW method")
+
+            // Get content URI using FileProvider
+            val apkUri = FileProvider.getUriForFile(
+                context,
+                "${context.packageName}.fileprovider",
+                apkFile
+            )
+
+            // Create install intent for older Android versions
             val installIntent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -266,17 +331,17 @@ class AppUpdateDownloader(private val context: Context) {
             if (installIntent.resolveActivity(context.packageManager) != null) {
                 context.startActivity(installIntent)
                 _downloadState.value = DownloadState.Installing
-                Log.d(TAG, "Installation intent sent successfully")
+                Log.d(TAG, "Legacy installation intent sent successfully")
                 true
             } else {
-                Log.e(TAG, "No app can handle APK installation")
+                Log.e(TAG, "No app can handle legacy APK installation")
                 _downloadState.value = DownloadState.Error("Cannot install APK - no compatible installer found")
                 false
             }
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error during APK installation", e)
-            _downloadState.value = DownloadState.Error("Installation failed: ${e.message}")
+            Log.e(TAG, "Error during legacy APK installation", e)
+            _downloadState.value = DownloadState.Error("Legacy installation failed: ${e.message}")
             false
         }
     }

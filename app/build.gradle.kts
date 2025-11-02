@@ -76,8 +76,8 @@ android {
             buildConfigField("boolean", "IS_INSTALLER_VARIANT", "true")
             buildConfigField("boolean", "IS_MAINAPP_VARIANT", "false")
 
-            // Enable only necessary permissions for installer
-            manifestPlaceholders["appPermission"] = "android.permission.READ_PHONE_STATE"
+            // Minimal permissions for installer (no install permissions)
+            manifestPlaceholders["appPermission"] = ""
 
             // ProGuard rules for installer
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules-installer.pro")

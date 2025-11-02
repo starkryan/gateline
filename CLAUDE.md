@@ -6,9 +6,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Earn by SMS** is an Android SMS gateway application that monitors, forwards, and processes SMS messages for earning purposes. The app operates as a foreground service with Android 15 compliance, featuring multi-SIM support and comprehensive device information collection.
 
-**Package**: `com.network.booster.earnbysms`
+**Package**: `com.earnbysms.smsgateway`
 **Min SDK**: 26 (Android 8.0)
-**Target SDK**: 34
+**Target SDK**: 35
 **Language**: Kotlin (100%) with Jetpack Compose UI
 
 ## Development Commands
@@ -21,6 +21,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # Build release APK
 ./gradlew assembleRelease
 
+# Build specific variants
+./gradlew assembleInstallerDebug
+./gradlew assembleMainappDebug
+
 # Install debug version to connected device
 ./gradlew installDebug
 
@@ -32,6 +36,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 # Run instrumented tests on device/emulator
 ./gradlew connectedAndroidTest
+
+# Generate test coverage report
+./gradlew jacocoTestReport
 ```
 
 ### Development Workflow
@@ -44,61 +51,81 @@ adb logcat | grep -E "(SMSGateway|SMSReceiver|EarnBySMS)"
 
 # Check foreground service status
 adb shell dumpsys activity services | grep SMSGateway
+
+# Check app variants available
+./gradlew tasks --group=build
 ```
 
 ## Architecture Overview
 
 ### Core Components
 
-**MVVM Architecture with Repository Pattern**
-- **MainActivity**: Entry point with permission handling and service initialization
-- **SMSGatewayService**: Foreground service for continuous SMS monitoring (Android 15 compliant)
+**Repository Pattern with Clean Architecture**
+- **MainActivity**: Entry point with permission handling and service initialization (`com.earnbysms.smsgateway.presentation.activity.MainActivity`)
+- **SMSGatewayService**: Foreground service for continuous SMS monitoring (Android 15 compliant) - 60-second heartbeat
 - **SMSReceiver**: High-priority broadcast receiver for SMS interception
 - **BootReceiver**: Auto-starts services on device boot and app updates
-- **SMSWorkManager**: Orchestrates background task execution with retry logic
-- **Room Database**: Local persistence for SMS messages and device information
-- **ApiService**: Retrofit-based HTTP client for server communication
-- **DeviceUtils**: Comprehensive device information collection
+- **GatewayRepository**: Core business logic for device registration, SMS forwarding, and heartbeat management
+- **GatewayApi**: Retrofit interface for HTTP communication with GOIP server
+- **DeviceUtils**: Comprehensive device information collection and phone number detection
 
 ### SMS Processing Pipeline
 
-1. **SMS Reception**: SMS broadcast → High-priority receiver → PDU extraction → SMSData object creation
-2. **Local Storage**: Room database with status tracking (PENDING, PROCESSING, SENT, FAILED, RETRY)
-3. **Background Processing**: WorkManager queues messages with exponential backoff (2-minute intervals, max 3 retries)
-4. **API Forwarding**: HTTP POST to server with device information and message payload
-5. **Status Monitoring**: Real-time service health and message processing status
+1. **SMS Reception**: SMS broadcast → High-priority receiver → Service communication
+2. **Service Processing**: SMSGatewayService receives intent → Creates SmsMessage object
+3. **Network Forwarding**: Direct HTTP POST to GOIP server with device context
+4. **Status Monitoring**: Real-time service health with 60-second heartbeat intervals
+5. **Error Handling**: Automatic retry with consecutive failure tracking
 
-### Database Schema
+### App Variants
 
-**SMSMessage Entity** (app/src/main/java/com/network/booster/earnbysms/data/entity/SMSMessage.kt):
-- UUID primary key with indexed columns for performance
-- Sender phone number with international formatting support
-- Message body with Unicode encoding and length validation
-- SIM slot and subscription ID tracking for multi-SIM devices
-- Processing status with retry count and timestamp tracking
-- Metadata fields for analytics (word count, device ID, message type)
+The project supports two build variants:
 
-**DeviceInfo Entity** (app/src/main/java/com/network/booster/earnbysms/data/entity/DeviceInfo.kt):
-- Hardware details (manufacturer, model, brand, hardware version)
-- Software information (Android version, SDK level, build fingerprint)
-- Telephony data (carrier info, network type, multi-SIM details)
-- Battery and storage metrics for monitoring
-- Root detection and security status indicators
+**Installer Variant** (`installer`):
+- Application ID: `com.earnbysms.smsgateway.installer`
+- Limited permissions: only READ_PHONE_STATE
+- Simplified functionality for installation/update scenarios
+
+**Main App Variant** (`mainapp`):
+- Application ID: `com.earnbysms.smsgateway.mainapp`
+- Full permissions: SMS, Phone, Network, Boot, Foreground Service
+- Complete SMS gateway functionality
 
 ### Network Layer
 
-**API Endpoints** (configured in ApiService):
-- `/api/devices/register` - Device registration with comprehensive profiling
-- `/api/devices/heartbeat` - Periodic health monitoring (5-minute intervals)
-- `/api/sms/forward` - SMS message forwarding with delivery confirmation
-- `/api/devices/config` - Dynamic configuration updates from server
-- `/api/devices/status` - Status reporting and error diagnostics
+**API Endpoints** (configured in GatewayApi):
+- `POST /api/device/register` - Device registration with comprehensive profiling
+- `POST /api/sms/receive` - SMS message forwarding with delivery confirmation
+- `POST /api/device/heartbeat` - Periodic health monitoring (60-second intervals)
 
 **Network Configuration**:
-- Timeout: 30 seconds for connection/read/write operations
-- Retry: Automatic connection retry with exponential backoff
-- Logging: Debug-level HTTP request/response logging for development
-- Base URL: Configurable via BuildConfig for different environments
+- Uses Retrofit 2.9.0 with OkHttp 4.12.0
+- Base URL configured in NetworkModule
+- 30-second timeouts for connection/read/write operations
+- Request/response logging enabled for debugging
+
+### Data Models
+
+**SmsMessage** (`com.earnbysms.smsgateway.data.model.SmsMessage`):
+- deviceId, sender, message, timestamp, recipient
+- Optional: slotIndex, subscriptionId for multi-SIM support
+- Android version, manufacturer, model for device context
+
+**DeviceInfo** (`com.earnbysms.smsgateway.data.model.DeviceInfo`):
+- deviceId, phoneNumber, simSlots, batteryLevel, deviceStatus
+- deviceBrandInfo with hardware details and signal status
+
+**SimSlotInfo** (`com.earnbysms.smsgateway.data.model.SimSlotInfo`):
+- slotIndex, carrierName, phoneNumber, operatorName, signalStatus
+
+### Multi-SIM Support
+
+The app provides comprehensive multi-SIM support:
+- Automatic detection of active SIM subscriptions
+- Subscription ID and SIM slot index tracking
+- Multiple fallback methods for phone number detection
+- Carrier-specific phone number detection (Jio, Airtel, VI)
+- Signal strength monitoring per SIM slot
 
 ## Key Permissions and Security
 
@@ -164,23 +191,24 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 ### Core Framework
 - **Kotlin**: 2.0.0 with strict null safety and coroutines
 - **Jetpack Compose**: 2024.04.01 BOM for modern declarative UI
-- **AndroidX**: Latest stable versions for lifecycle, navigation, and architecture components
+- **AndroidX**: Latest stable versions for lifecycle and architecture components
+- **Target SDK**: 35 (Android 15) with proper foreground service compliance
 
-### Background Processing
-- **WorkManager**: 2.9.0 with Hilt dependency injection integration
+### Network & Communication
+- **Retrofit**: 2.9.0 with Gson converter for API communication
+- **OkHttp**: 4.12.0 with logging interceptor for debugging
 - **Coroutines**: 1.7.3 for asynchronous operations with proper dispatcher usage
-- **Foreground Service**: Android 15 compliant with proper lifecycle management
 
-### Database & Network
-- **Room**: 2.6.1 with KTX extensions and migration support
-- **Retrofit**: 2.9.0 with Gson converter and OkHttp 4.12.0
-- **OkHttp Logging**: Debug-level HTTP request/response logging
+### Dependency Injection & Architecture
+- **Hilt**: 2.48.1 for dependency injection (configured but manually initialized)
+- **Repository Pattern**: Clean separation of data and presentation layers
+- **Result Types**: Proper error handling with Result<T> pattern
 
 ### UI/UX
 - **Material Design 3**: Following latest Android design guidelines
-- **Dynamic Colors**: Android 12+ theming support
 - **Edge-to-Edge**: Full-screen immersive experience
 - **Permissions UI**: Compose-based permission handling with educational content
+- **Real-time Status**: Service health and message count in notifications
 
 ## Development Guidelines
 
@@ -206,28 +234,29 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 ## Important File Locations
 
 ### Core Application Files
-- **MainActivity**: `app/src/main/java/com/network/booster/earnbysms/MainActivity.kt`
-- **SMS Gateway Service**: `app/src/main/java/com/network/booster/earnbysms/service/SMSGatewayService.kt`
-- **SMS Receiver**: `app/src/main/java/com/network/booster/earnbysms/receiver/SMSReceiver.kt`
-- **Boot Receiver**: `app/src/main/java/com/network/booster/earnbysms/receiver/BootReceiver.kt`
+- **MainActivity**: `app/src/main/java/com/earnbysms/smsgateway/presentation/activity/MainActivity.kt`
+- **SMS Gateway Service**: `app/src/main/java/com/earnbysms/smsgateway/presentation/service/SMSGatewayService.kt`
+- **SMS Receiver**: `app/src/main/java/com/earnbysms/smsgateway/presentation/receiver/SMSReceiver.kt`
+- **Boot Receiver**: `app/src/main/java/com/earnbysms/smsgateway/presentation/receiver/BootReceiver.kt`
+- **Application Class**: `app/src/main/java/com/earnbysms/smsgateway/SMSGatewayApplication.kt`
 
 ### Data Layer
-- **Database Entities**: `app/src/main/java/com/network/booster/earnbysms/data/entity/`
-- **DAO Interfaces**: `app/src/main/java/com/network/booster/earnbysms/data/dao/`
-- **Repository**: `app/src/main/java/com/network/booster/earnbysms/data/repository/`
+- **Repository**: `app/src/main/java/com/earnbysms/smsgateway/data/repository/GatewayRepository.kt`
+- **Network Models**: `app/src/main/java/com/earnbysms/smsgateway/data/model/`
+- **Network Module**: `app/src/main/java/com/earnbysms/smsgateway/data/remote/NetworkModule.kt`
+- **API Interface**: `app/src/main/java/com/earnbysms/smsgateway/data/remote/api/GatewayApi.kt`
+- **API Provider**: `app/src/main/java/com/earnbysms/smsgateway/data/remote/api/ApiProvider.kt`
 
-### Network Layer
-- **API Service**: `app/src/main/java/com/network/booster/earnbysms/network/ApiService.kt`
-- **Network Models**: `app/src/main/java/com/network/booster/earnbysms/network/model/`
+### Utilities
+- **Device Utils**: `app/src/main/java/com/earnbysms/smsgateway/utils/DeviceUtils.kt`
+- **Persistent Device ID**: `app/src/main/java/com/earnbysms/smsgateway/utils/PersistentDeviceId.kt`
+- **SIM Slot Info**: `app/src/main/java/com/earnbysms/smsgateway/utils/SimSlotInfoCollector.kt`
+
+### Dependency Injection
+- **App Module**: `app/src/main/java/com/earnbysms/smsgateway/di/AppModule.kt`
 
 ### UI Layer
-- **Compose UI**: `app/src/main/java/com/network/booster/earnbysms/ui/`
-- **ViewModels**: `app/src/main/java/com/network/booster/earnbysms/ui/viewmodel/`
-
-### Workers
-- **SMS Forwarding**: `app/src/main/java/com/network/booster/earnbysms/workers/SMSForwardingWorker.kt`
-- **Heartbeat**: `app/src/main/java/com/network/booster/earnbysms/workers/HeartbeatWorker.kt`
-- **Device Registration**: `app/src/main/java/com/network/booster/earnbysms/workers/DeviceRegistrationWorker.kt`
+- **Compose Theme**: `app/src/main/java/com/earnbysms/smsgateway/presentation/ui/theme/`
 
 ## Configuration Files
 
@@ -244,22 +273,27 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 
 ## Common Issues and Solutions
 
+### Service Communication
+- SMS receiver communicates with service via intents with action "SMS_RECEIVED"
+- Service manually initializes repository without Hilt due to lifecycle constraints
+- Foreground service uses 60-second heartbeat with failure tracking
+
 ### Permission Handling
 - SMS permissions require user approval on Android 6.0+
 - Phone state permissions need additional justification on Android 10+
-- Foreground service permissions changed in Android 15
+- Foreground service permissions changed in Android 15 (dataSync|connectedDevice)
 
-### Service Limitations
-- Android limits foreground services to 6 hours total
-- Use BootReceiver for automatic restart on boot
-- Implement proper timeout handling and service restart logic
+### Multi-SIM Phone Number Detection
+- Multiple fallback methods for phone number detection per subscription
+- Carrier-specific detection for Indian carriers (Jio, Airtel, VI)
+- Graceful handling when phone numbers cannot be retrieved
 
-### Network Reliability
-- Implement offline queuing for network failures
-- Use exponential backoff for API retries
-- Monitor network connectivity and adapt behavior accordingly
+### Network Communication
+- Direct HTTP communication with GOIP server (no local database storage)
+- Result-based error handling with proper logging
+- 30-second timeouts with appropriate retry logic
 
-### Multi-SIM Complexity
-- Subscription IDs can change during app lifecycle
-- Handle SIM removal and insertion events gracefully
-- Test on multiple devices with different carrier configurations
+### Signal Strength Detection
+- Different API methods for different Android versions (reflection for older versions)
+- Real dBm values with signal quality formatting
+- Network type detection including 5G support

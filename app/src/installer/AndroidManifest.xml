@@ -2,29 +2,32 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- Installer-specific permissions (minimal set) -->
-    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
-    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <!-- Remove all SMS and Phone permissions from installer variant -->
+    <uses-permission android:name="android.permission.READ_SMS" tools:node="remove" />
+    <uses-permission android:name="android.permission.RECEIVE_SMS" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" tools:node="remove" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" tools:node="remove" />
 
-    <!-- Network permissions for device registration -->
+    <!-- Remove foreground service permissions from installer variant -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" tools:node="remove" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove" />
+
+    <!-- Remove boot receiver permission from installer variant -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove" />
+
+    <!-- Essential permissions for downloading -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
-
-    <!-- Installation permissions -->
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />
 
-    <!-- Storage permissions for device info and APK download (conditional) -->
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
-        android:maxSdkVersion="32" />
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
-        android:maxSdkVersion="28" />
-    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
-        tools:ignore="ScopedStorage" />
-
-    <!-- Hardware Feature Declaration -->
+    <!-- No hardware requirements -->
     <uses-feature
         android:name="android.hardware.telephony"
-        android:required="true" />
+        android:required="false" />
 
     <application
         android:name=".SMSGatewayApplication"
@@ -42,6 +45,19 @@
             android:name="com.earnbysms.smsgateway.presentation.activity.MainActivity"
             tools:node="remove" />
 
+        <!-- Remove all SMS gateway services from installer variant -->
+        <service
+            android:name="com.earnbysms.smsgateway.service.SMSGatewayService"
+            tools:node="remove" />
+
+        <!-- Remove all SMS gateway receivers from installer variant -->
+        <receiver
+            android:name="com.earnbysms.smsgateway.receiver.SMSReceiver"
+            tools:node="remove" />
+        <receiver
+            android:name="com.earnbysms.smsgateway.receiver.BootReceiver"
+            tools:node="remove" />
+
         <!-- Only Installer Activity - exclude main app MainActivity -->
         <activity
             android:name="com.earnbysms.smsgateway.presentation.activity.InstallerMainActivity"
@@ -54,7 +70,7 @@
             </intent-filter>
         </activity>
 
-        <!-- FileProvider for secure APK access -->
+        <!-- FileProvider for secure APK installation -->
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

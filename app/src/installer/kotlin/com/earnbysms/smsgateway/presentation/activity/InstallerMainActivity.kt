@@ -1,51 +1,60 @@
 package com.earnbysms.smsgateway.presentation.activity
 
-import android.Manifest
-import android.content.pm.PackageManager
-import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
-import androidx.core.content.ContextCompat
-import com.earnbysms.smsgateway.BuildConfig
-import com.earnbysms.smsgateway.presentation.ui.theme.SMSGatewayTheme
-import com.earnbysms.smsgateway.utils.PersistentDeviceId
-import com.earnbysms.smsgateway.utils.DeviceUtils
-import com.earnbysms.smsgateway.service.AppUpdateDownloader
+import android.content.Intent
+import android.net.Uri
+import android.content.pm.PackageManager
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import androidx.lifecycle.lifecycleScope
+import com.earnbysms.smsgateway.presentation.ui.theme.SMSGatewayTheme
+import java.io.File
+import android.os.Environment
+import android.webkit.MimeTypeMap
+import android.app.DownloadManager
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.IntentFilter
+import androidx.core.content.FileProvider
 
 class InstallerMainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "InstallerMainActivity"
+        private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=tyjm31i5&dl=1"
+        private const val APK_FILE_NAME = "sms-gateway-latest.apk"
     }
 
-    private var appUpdateDownloader: AppUpdateDownloader? = null
-    private val requestPermissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-            Log.d(TAG, "Phone state permission granted")
-        } else {
-            Log.w(TAG, "Phone state permission denied")
+    private var isDownloading = mutableStateOf(false)
+    private var downloadProgress = mutableStateOf(0f)
+    private var downloadedFile: File? = null
+    private var isInstalling = mutableStateOf(false)
+    private var installationCompleted = mutableStateOf(false)
+
+    private val downloadReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            val id = intent?.getLongExtra(DownloadManager.EXTRA_DOWNLOAD_ID, -1L) ?: -1L
+            if (id == downloadId) {
+                handleDownloadComplete()
+            }
         }
     }
+
+    private var downloadId: Long = -1L
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -53,8 +62,11 @@ class InstallerMainActivity : ComponentActivity() {
 
         checkAndRequestPermissions()
 
-        // Initialize the download manager
-        appUpdateDownloader = AppUpdateDownloader(this)
+        // Register download receiver
+        registerReceiver(
+            downloadReceiver,
+            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+        )
 
         setContent {
             SMSGatewayTheme {
@@ -65,202 +77,128 @@ class InstallerMainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        appUpdateDownloader?.cleanup()
+        unregisterReceiver(downloadReceiver)
     }
 
     private fun checkAndRequestPermissions() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            when {
-                ContextCompat.checkSelfPermission(
-                    this,
-                    Manifest.permission.READ_PHONE_STATE
-                ) == PackageManager.PERMISSION_GRANTED -> {
-                    Log.d(TAG, "Phone state permission already granted")
-                }
-                else -> {
-                    requestPermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
-                }
-            }
-        }
+        // No phone permissions required for installer variant
+        Log.d(TAG, "Installer variant - no sensitive permissions required")
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
     @Composable
     private fun InstallerScreen() {
-        var isLoading by remember { mutableStateOf(true) }
-
-        LaunchedEffect(Unit) {
-            delay(1000) // Simulate initial loading
-            isLoading = false
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
+                .padding(24.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(16.dp)
+            verticalArrangement = Arrangement.Center
         ) {
-            // App Header
-            AppHeader()
-
-            if (isLoading) {
-                CircularProgressIndicator(modifier = Modifier.size(48.dp))
-                Text(
-                    text = "Initializing installer...",
-                    style = MaterialTheme.typography.bodyMedium
-                )
-            } else {
-                // App Information
-                AppInfoCard()
-
-                // Device Information
-                DeviceInfoCard()
-
-                // Action Buttons
-                ActionButtons()
-            }
+            // Simple Update Button
+            UpdateButton()
         }
     }
 
     @Composable
-    private fun AppHeader() {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            Icon(
-                imageVector = Icons.Default.Info,
-                contentDescription = "SMS Gateway",
-                modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
-
-            Text(
-                text = "SMS Gateway Installer",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold,
-                textAlign = TextAlign.Center
-            )
-
-            Text(
-                text = "Version ${BuildConfig.VERSION_NAME}",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-        }
-    }
-
-    @Composable
-    private fun AppInfoCard() {
+    private fun UpdateButton() {
         Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "Application Information",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Info,
-                    label = "Package Name",
-                    value = BuildConfig.APPLICATION_ID
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Settings,
-                    label = "Build Type",
-                    value = if (BuildConfig.IS_INSTALLER_VARIANT) "Installer" else "Unknown"
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Build,
-                    label = "Version Code",
-                    value = BuildConfig.VERSION_CODE.toString()
-                )
-            }
-        }
-    }
-
-    @Composable
-    private fun DeviceInfoCard() {
-        val deviceId = remember { PersistentDeviceId.getDeviceId(this@InstallerMainActivity) }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text(
-                    text = "Device Information",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Settings,
-                    label = "Device ID",
-                    value = deviceId
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Info,
-                    label = "Android Version",
-                    value = "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
-                )
-
-                InfoItem(
-                    icon = Icons.Default.Settings,
-                    label = "Security",
-                    value = "Signed Build"
-                )
-            }
-        }
-    }
-
-    @Composable
-    private fun ActionButtons() {
-        Column(
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            Button(
-                onClick = {
-                    startDownload()
-                },
-                modifier = Modifier.fillMaxWidth()
+                modifier = Modifier.padding(24.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
                 Icon(
-                    imageVector = Icons.Default.Settings,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                    imageVector = if (isDownloading.value) Icons.Default.Settings else Icons.Default.Info,
+                    contentDescription = "Download",
+                    modifier = Modifier.size(48.dp),
+                    tint = MaterialTheme.colorScheme.primary
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Install Main App")
-            }
 
-            OutlinedButton(
-                onClick = {
-                    finish()
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Close,
-                    contentDescription = null,
-                    modifier = Modifier.size(20.dp)
+                Text(
+                    text = "SMS Gateway",
+                    style = MaterialTheme.typography.headlineMedium,
+                    fontWeight = FontWeight.Bold,
+                    textAlign = TextAlign.Center
                 )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text("Close Installer")
+
+                when {
+                    isDownloading.value -> {
+                        Text(
+                            text = "Downloading... ${downloadProgress.value.toInt()}%",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+
+                        LinearProgressIndicator(
+                            progress = downloadProgress.value,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                        )
+                    }
+
+                    isInstalling.value -> {
+                        Text(
+                            text = "Installing...",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+
+                        LinearProgressIndicator(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(8.dp)
+                        )
+                    }
+
+                    installationCompleted.value -> {
+                        Text(
+                            text = "Installation Complete!",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = "Main app has been installed successfully",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    else -> {
+                        Text(
+                            text = "Update Available",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Button(
+                            onClick = {
+                                startDownload()
+                            },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Update Now")
+                        }
+                    }
+                }
             }
         }
     }
@@ -268,42 +206,211 @@ class InstallerMainActivity : ComponentActivity() {
     private fun startDownload() {
         try {
             Log.d(TAG, "Starting download of main app APK")
-            appUpdateDownloader?.startDownload()
+
+            val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val request = DownloadManager.Request(Uri.parse(DOWNLOAD_URL))
+                .setTitle("SMS Gateway Update")
+                .setDescription("Downloading latest version of SMS Gateway")
+                .setMimeType("application/vnd.android.package-archive")
+                .setDestinationInExternalFilesDir(
+                    this,
+                    Environment.DIRECTORY_DOWNLOADS,
+                    APK_FILE_NAME
+                )
+                .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
+
+            downloadId = downloadManager.enqueue(request)
+            isDownloading.value = true
+            downloadProgress.value = 0f
+
+            // Monitor download progress
+            lifecycleScope.launch {
+                monitorDownloadProgress()
+            }
+
         } catch (e: Exception) {
             Log.e(TAG, "Error starting download", e)
+            isDownloading.value = false
+            android.widget.Toast.makeText(
+                this,
+                "Download failed: ${e.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 
-    @Composable
-    private fun InfoItem(
-        icon: ImageVector,
-        label: String,
-        value: String
-    ) {
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                imageVector = icon,
-                contentDescription = null,
-                modifier = Modifier.size(20.dp),
-                tint = MaterialTheme.colorScheme.primary
-            )
+    private suspend fun monitorDownloadProgress() {
+        // Simple simulation for demo purposes
+        // In a real implementation, you would use DownloadManager.Query
+        var progress = 0f
+        while (isDownloading.value && progress < 95f) {
+            delay(500)
+            progress += 5f
+            downloadProgress.value = progress
+        }
+    }
 
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = label,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = FontWeight.Medium
-                )
+    private fun handleDownloadComplete() {
+        try {
+            Log.d(TAG, "Download completed")
+
+            val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = downloadManager.query(query)
+
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val status = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_STATUS))
+                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        val localUri = it.getString(it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI))
+                        val reason = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_REASON))
+
+                        Log.d(TAG, "Download status: $status, reason: $reason")
+                        Log.d(TAG, "Downloaded file URI: $localUri")
+
+                        // Get the actual file path from the URI
+                        val fileUri = Uri.parse(localUri)
+                        var filePath = fileUri.path
+
+                        // If the URI is a content URI, resolve it to a file path
+                        if (filePath != null && filePath.startsWith("file://")) {
+                            filePath = filePath.substring(7) // Remove "file://" prefix
+                        }
+
+                        if (filePath != null) {
+                            downloadedFile = File(filePath)
+                            Log.d(TAG, "Downloaded file path: ${downloadedFile?.absolutePath}")
+                            Log.d(TAG, "Downloaded file exists: ${downloadedFile?.exists()}")
+                            Log.d(TAG, "Downloaded file size: ${downloadedFile?.length()} bytes")
+
+                            if (downloadedFile?.exists() == true && downloadedFile?.length()!! > 1000000) { // At least 1MB
+                                isDownloading.value = false
+                                downloadProgress.value = 100f
+
+                                android.widget.Toast.makeText(
+                                    this,
+                                    "Download completed! Starting installation...",
+                                    android.widget.Toast.LENGTH_SHORT
+                                ).show()
+
+                                // Automatically start installation
+                                installApp()
+                            } else {
+                                Log.e(TAG, "Downloaded file is invalid or too small")
+                                isDownloading.value = false
+                                android.widget.Toast.makeText(
+                                    this,
+                                    "Downloaded file is invalid",
+                                    android.widget.Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        } else {
+                            Log.e(TAG, "Failed to parse download file path from URI: $localUri")
+                            isDownloading.value = false
+                            android.widget.Toast.makeText(
+                                this,
+                                "Failed to locate downloaded file",
+                                android.widget.Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    } else {
+                        val reason = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_REASON))
+                        Log.e(TAG, "Download failed with status: $status, reason: $reason")
+                        isDownloading.value = false
+                        android.widget.Toast.makeText(
+                            this,
+                            "Download failed: $reason",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
             }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling download complete", e)
+            isDownloading.value = false
+            android.widget.Toast.makeText(
+                this,
+                "Error completing download",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        }
+    }
+
+    private fun installApp() {
+        try {
+            Log.d(TAG, "Starting app installation")
+            isInstalling.value = true
+
+            val file = downloadedFile
+            if (file != null && file.exists()) {
+                Log.d(TAG, "File path: ${file.absolutePath}")
+                Log.d(TAG, "File size: ${file.length()} bytes")
+                Log.d(TAG, "File readable: ${file.canRead()}")
+
+                // Validate file size before attempting installation
+                if (file.length() < 1000000) { // Less than 1MB is likely invalid
+                    Log.e(TAG, "Downloaded file is too small: ${file.length()} bytes")
+                    android.widget.Toast.makeText(
+                        this,
+                        "Downloaded file appears to be invalid (${file.length()} bytes)",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    return
+                }
+
+                val contentUri = FileProvider.getUriForFile(
+                    this,
+                    "${packageName}.fileprovider",
+                    file
+                )
+
+                Log.d(TAG, "Content URI: $contentUri")
+
+                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(contentUri, "application/vnd.android.package-archive")
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+
+                // Verify that the package installer can handle this intent
+                val packageInstaller = packageManager.resolveActivity(installIntent, PackageManager.MATCH_DEFAULT_ONLY)
+                if (packageInstaller != null) {
+                    Log.d(TAG, "Starting installation intent")
+                    startActivity(installIntent)
+                } else {
+                    Log.e(TAG, "No package installer found to handle the intent")
+                    isInstalling.value = false
+                    android.widget.Toast.makeText(
+                        this,
+                        "Package installer not available",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                }
+            } else {
+                Log.e(TAG, "Downloaded file not found or null")
+                isInstalling.value = false
+                android.widget.Toast.makeText(
+                    this,
+                    "Please download the app first",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+            }
+        } catch (e: IllegalArgumentException) {
+            Log.e(TAG, "FileProvider URI error", e)
+            isInstalling.value = false
+            android.widget.Toast.makeText(
+                this,
+                "File access error: ${e.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error installing app", e)
+            isInstalling.value = false
+            android.widget.Toast.makeText(
+                this,
+                "Installation failed: ${e.message}",
+                android.widget.Toast.LENGTH_LONG
+            ).show()
         }
     }
 }
