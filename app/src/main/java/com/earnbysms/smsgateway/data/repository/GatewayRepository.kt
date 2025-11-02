@@ -37,13 +37,12 @@ class GatewayRepository(
             val deviceInfo = collectDeviceInfo()
             val response = gatewayApi.registerDevice(deviceInfo)
 
-            if (response.isSuccessful) {
-                Log.d(TAG, "Device registered successfully: ${response.body()}")
+            if (response.success) {
+                Log.d(TAG, "Device registered successfully: $response")
                 Result.success(true)
             } else {
-                val errorBody = response.errorBody()?.string()
-                Log.e(TAG, "Device registration failed: ${response.code()} ${response.message()} - $errorBody")
-                Result.failure(Exception("Registration failed: ${response.code()}"))
+                Log.e(TAG, "Device registration failed: ${response.message}")
+                Result.failure(Exception("Registration failed: ${response.message}"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Network error during device registration", e)
@@ -79,13 +78,12 @@ class GatewayRepository(
 
             val response = gatewayApi.forwardSms(smsMessage)
 
-            if (response.isSuccessful) {
+            if (response.success) {
                 Log.d(TAG, "SMS forwarded successfully: $sender -> $recipient")
                 Result.success(true)
             } else {
-                val errorBody = response.errorBody()?.string()
-                Log.e(TAG, "SMS forwarding failed: ${response.code()} ${response.message()} - $errorBody")
-                Result.failure(Exception("SMS forwarding failed: ${response.code()}"))
+                Log.e(TAG, "SMS forwarding failed: ${response.message}")
+                Result.failure(Exception("SMS forwarding failed: ${response.message}"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Network error during SMS forwarding", e)
@@ -107,13 +105,12 @@ class GatewayRepository(
 
             val response = gatewayApi.sendHeartbeat(heartbeatData)
 
-            if (response.isSuccessful) {
+            if (response.success) {
                 Log.d(TAG, "Heartbeat sent successfully")
                 Result.success(true)
             } else {
-                val errorBody = response.errorBody()?.string()
-                Log.e(TAG, "Heartbeat failed: ${response.code()} ${response.message()} - $errorBody")
-                Result.failure(Exception("Heartbeat failed: ${response.code()}"))
+                Log.e(TAG, "Heartbeat failed: ${response.message}")
+                Result.failure(Exception("Heartbeat failed: ${response.message}"))
             }
         } catch (e: Exception) {
             Log.e(TAG, "Heartbeat failed", e)
