@@ -52,7 +52,7 @@ object NetworkModule {
         gson: Gson
     ): Retrofit {
         return Retrofit.Builder()
-            .baseUrl("http://your-goip-server.com:3000/")
+            .baseUrl("https://ungroaning-kathe-ceilinged.ngrok-free.dev/")
             .client(okHttpClient)
             .addConverterFactory(GsonConverterFactory.create(gson))
             .build()
