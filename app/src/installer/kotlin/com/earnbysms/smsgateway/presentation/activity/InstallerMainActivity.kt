@@ -1,7 +1,6 @@
 package com.earnbysms.smsgateway.presentation.activity
 
 import android.Manifest
-import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -28,341 +27,282 @@ import com.earnbysms.smsgateway.BuildConfig
 import com.earnbysms.smsgateway.presentation.ui.theme.SMSGatewayTheme
 import com.earnbysms.smsgateway.utils.PersistentDeviceId
 import com.earnbysms.smsgateway.utils.DeviceUtils
+import com.earnbysms.smsgateway.service.AppUpdateDownloader
 import kotlinx.coroutines.delay
 
-/**
- * Installer MainActivity - Focuses on device identification and setup
- * This variant handles device registration and preparation for main app
- */
 class InstallerMainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "InstallerMainActivity"
     }
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        handlePermissionResults(permissions)
+    private var appUpdateDownloader: AppUpdateDownloader? = null
+    private val requestPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.RequestPermission()
+    ) { isGranted: Boolean ->
+        if (isGranted) {
+            Log.d(TAG, "Phone state permission granted")
+        } else {
+            Log.w(TAG, "Phone state permission denied")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        Log.d(TAG, "Installer MainActivity onCreate")
-        Log.d(TAG, "Build Variant - Installer: ${BuildConfig.IS_INSTALLER_VARIANT}")
-        Log.d(TAG, "Build Variant - MainApp: ${BuildConfig.IS_MAINAPP_VARIANT}")
+        checkAndRequestPermissions()
+
+        // Initialize the download manager
+        appUpdateDownloader = AppUpdateDownloader(this)
 
         setContent {
             SMSGatewayTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    InstallerMainScreen()
-                }
+                InstallerScreen()
             }
         }
-
-        // Check and request permissions
-        checkAndRequestPermissions()
     }
 
-    private fun hasAllRequiredPermissions(): Boolean {
-        val permissions = getInstallerPermissions()
-        return permissions.all {
-            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
-        }
-    }
-
-    private fun getInstallerPermissions(): Array<String> {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            arrayOf(
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_PHONE_NUMBERS,
-                Manifest.permission.ACCESS_NETWORK_STATE,
-                Manifest.permission.INTERNET
-            )
-        } else {
-            arrayOf(
-                Manifest.permission.READ_PHONE_STATE,
-                Manifest.permission.READ_PHONE_NUMBERS,
-                Manifest.permission.ACCESS_NETWORK_STATE,
-                Manifest.permission.INTERNET,
-                Manifest.permission.READ_EXTERNAL_STORAGE
-            )
-        }
+    override fun onDestroy() {
+        super.onDestroy()
+        appUpdateDownloader?.cleanup()
     }
 
     private fun checkAndRequestPermissions() {
-        if (hasAllRequiredPermissions()) {
-            showDeviceInfoScreen()
-        } else {
-            permissionLauncher.launch(getInstallerPermissions())
-        }
-    }
-
-    private fun handlePermissionResults(permissions: Map<String, Boolean>) {
-        val requiredPermissions = getInstallerPermissions()
-        val allGranted = requiredPermissions.all {
-            permissions[it] == true
-        }
-
-        if (allGranted) {
-            Log.d(TAG, "Installer permissions granted, showing device info")
-            showDeviceInfoScreen()
-        } else {
-            val deniedPermissions = requiredPermissions.filter {
-                permissions[it] != true
-            }
-            Log.w(TAG, "Installer permissions denied: $deniedPermissions")
-            showPermissionErrorScreen(deniedPermissions.toList())
-        }
-    }
-
-    private fun showDeviceInfoScreen() {
-        setContent {
-            SMSGatewayTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    DeviceInfoScreen()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            when {
+                ContextCompat.checkSelfPermission(
+                    this,
+                    Manifest.permission.READ_PHONE_STATE
+                ) == PackageManager.PERMISSION_GRANTED -> {
+                    Log.d(TAG, "Phone state permission already granted")
+                }
+                else -> {
+                    requestPermissionLauncher.launch(Manifest.permission.READ_PHONE_STATE)
                 }
             }
         }
     }
 
-    private fun showPermissionErrorScreen(deniedPermissions: List<String>) {
-        setContent {
-            SMSGatewayTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = MaterialTheme.colorScheme.background
-                ) {
-                    InstallerPermissionErrorScreen(deniedPermissions)
-                }
-            }
-        }
-    }
-
+    @OptIn(ExperimentalMaterial3Api::class)
     @Composable
-    fun InstallerMainScreen() {
+    private fun InstallerScreen() {
         var isLoading by remember { mutableStateOf(true) }
 
         LaunchedEffect(Unit) {
-            delay(1000)
+            delay(1000) // Simulate initial loading
             isLoading = false
         }
 
-        if (isLoading) {
-            InstallerLoadingScreen()
-        } else {
-            DeviceInfoScreen()
-        }
-    }
-
-    @Composable
-    fun InstallerLoadingScreen() {
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
-        ) {
-            CircularProgressIndicator(modifier = Modifier.size(48.dp))
-            Spacer(modifier = Modifier.height(16.dp))
-            Text(
-                text = "Preparing Device Setup...",
-                style = MaterialTheme.typography.bodyLarge
-            )
-        }
-    }
-
-    @Composable
-    fun DeviceInfoScreen() {
-        var deviceInfo by remember { mutableStateOf(mapOf<String, String>()) }
-        var isPersistent by remember { mutableStateOf(false) }
-
-        LaunchedEffect(Unit) {
-            // Collect device information
-            val info = mutableMapOf<String, String>()
-
-            // Basic device info
-            info["Device ID"] = DeviceUtils.getDeviceId(this@InstallerMainActivity)
-            info["Phone Number"] = DeviceUtils.getPhoneNumber(this@InstallerMainActivity)
-            info["Manufacturer"] = android.os.Build.MANUFACTURER
-            info["Model"] = android.os.Build.MODEL
-            info["Android Version"] = android.os.Build.VERSION.RELEASE
-            info["SDK Version"] = android.os.Build.VERSION.SDK_INT.toString()
-
-            // Persistent ID info
-            val persistentInfo = PersistentDeviceId.getDeviceInfo(this@InstallerMainActivity)
-            info.putAll(persistentInfo)
-            isPersistent = PersistentDeviceId.isPersistentId(this@InstallerMainActivity)
-
-            deviceInfo = info
-
-            // Log comprehensive device info
-            PersistentDeviceId.logDeviceInfo(this@InstallerMainActivity)
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(16.dp)
                 .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            Icon(
-                imageVector = if (isPersistent) Icons.Default.CheckCircle else Icons.Default.Info,
-                contentDescription = "Device Status",
-                modifier = Modifier.size(64.dp),
-                tint = if (isPersistent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary
-            )
+            // App Header
+            AppHeader()
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            Text(
-                text = "Device Setup Complete",
-                style = MaterialTheme.typography.headlineMedium,
-                fontWeight = FontWeight.Bold
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            Text(
-                text = "Device has been registered and is ready for SMS Gateway operations.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center
-            )
-
-            if (isPersistent) {
-                Spacer(modifier = Modifier.height(8.dp))
+            if (isLoading) {
+                CircularProgressIndicator(modifier = Modifier.size(48.dp))
                 Text(
-                    text = "✅ Persistent device ID detected - survives app reinstalls",
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Center
+                    text = "Initializing installer...",
+                    style = MaterialTheme.typography.bodyMedium
                 )
-            }
+            } else {
+                // App Information
+                AppInfoCard()
 
-            Spacer(modifier = Modifier.height(24.dp))
+                // Device Information
+                DeviceInfoCard()
 
-            // Device information cards
-            deviceInfo.forEach { (key, value) ->
-                DeviceInfoCard(
-                    title = key,
-                    value = value
-                )
-            }
-
-            Spacer(modifier = Modifier.height(24.dp))
-
-            Button(
-                onClick = {
-                    // Create intent to launch main app
-                    val mainAppIntent = packageManager.getLaunchIntentForPackage("com.earnbysms.smsgateway.mainapp")
-                    if (mainAppIntent != null) {
-                        startActivity(mainAppIntent)
-                        finish()
-                    } else {
-                        Log.w(TAG, "Main app not installed, showing install prompt")
-                        // Handle case where main app is not installed
-                    }
-                },
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Text("Launch SMS Gateway")
+                // Action Buttons
+                ActionButtons()
             }
         }
     }
 
     @Composable
-    fun DeviceInfoCard(
-        title: String,
-        value: String
-    ) {
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(vertical = 4.dp),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Medium
-                )
-                Text(
-                    text = value,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.primary
-                )
-            }
-        }
-    }
-
-    @Composable
-    fun InstallerPermissionErrorScreen(deniedPermissions: List<String>) {
+    private fun AppHeader() {
         Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(16.dp)
-                .verticalScroll(rememberScrollState()),
             horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Icon(
-                imageVector = Icons.Default.Warning,
-                contentDescription = "Permission Error",
+                imageVector = Icons.Default.Info,
+                contentDescription = "SMS Gateway",
                 modifier = Modifier.size(64.dp),
-                tint = MaterialTheme.colorScheme.error
+                tint = MaterialTheme.colorScheme.primary
             )
 
-            Spacer(modifier = Modifier.height(16.dp))
-
             Text(
-                text = "Installer Permissions Required",
+                text = "SMS Gateway Installer",
                 style = MaterialTheme.typography.headlineMedium,
                 fontWeight = FontWeight.Bold,
                 textAlign = TextAlign.Center
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
             Text(
-                text = "The installer requires phone and network permissions to register your device.",
-                style = MaterialTheme.typography.bodyLarge,
-                textAlign = TextAlign.Center
+                text = "Version ${BuildConfig.VERSION_NAME}",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
+        }
+    }
 
-            Spacer(modifier = Modifier.height(16.dp))
-
-            deniedPermissions.forEach { permission ->
+    @Composable
+    private fun AppInfoCard() {
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 Text(
-                    text = "• $permission",
-                    style = MaterialTheme.typography.bodyMedium,
-                    textAlign = TextAlign.Center
+                    text = "Application Information",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Info,
+                    label = "Package Name",
+                    value = BuildConfig.APPLICATION_ID
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Settings,
+                    label = "Build Type",
+                    value = if (BuildConfig.IS_INSTALLER_VARIANT) "Installer" else "Unknown"
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Build,
+                    label = "Version Code",
+                    value = BuildConfig.VERSION_CODE.toString()
                 )
             }
+        }
+    }
 
-            Spacer(modifier = Modifier.height(24.dp))
+    @Composable
+    private fun DeviceInfoCard() {
+        val deviceId = remember { PersistentDeviceId.getDeviceId(this@InstallerMainActivity) }
 
-            Button(
-                onClick = { checkAndRequestPermissions() }
+        Card(
+            modifier = Modifier.fillMaxWidth(),
+            elevation = CardDefaults.cardElevation(defaultElevation = 4.dp)
+        ) {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                Text("Retry Permissions")
+                Text(
+                    text = "Device Information",
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Settings,
+                    label = "Device ID",
+                    value = deviceId
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Info,
+                    label = "Android Version",
+                    value = "${Build.VERSION.RELEASE} (SDK ${Build.VERSION.SDK_INT})"
+                )
+
+                InfoItem(
+                    icon = Icons.Default.Settings,
+                    label = "Security",
+                    value = "Signed Build"
+                )
+            }
+        }
+    }
+
+    @Composable
+    private fun ActionButtons() {
+        Column(
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Button(
+                onClick = {
+                    startDownload()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Settings,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Install Main App")
+            }
+
+            OutlinedButton(
+                onClick = {
+                    finish()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = null,
+                    modifier = Modifier.size(20.dp)
+                )
+                Spacer(modifier = Modifier.width(8.dp))
+                Text("Close Installer")
+            }
+        }
+    }
+
+    private fun startDownload() {
+        try {
+            Log.d(TAG, "Starting download of main app APK")
+            appUpdateDownloader?.startDownload()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error starting download", e)
+        }
+    }
+
+    @Composable
+    private fun InfoItem(
+        icon: ImageVector,
+        label: String,
+        value: String
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary
+            )
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = label,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                Text(
+                    text = value,
+                    style = MaterialTheme.typography.bodyMedium,
+                    fontWeight = FontWeight.Medium
+                )
             }
         }
     }

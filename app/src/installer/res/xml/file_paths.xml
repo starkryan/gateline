@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <!-- External storage for APK downloads -->
+    <external-path name="external_files" path="." />
+
+    <!-- Cache directory for temporary APK files -->
+    <external-cache-path name="external_cache" path="." />
+
+    <!-- Internal cache for secure temporary storage -->
+    <cache-path name="cache" path="." />
+
+    <!-- Downloads directory for user-accessible APK files -->
+    <external-files-path name="downloads" path="Downloads/" />
+</paths>

@@ -27,9 +27,7 @@
 
     <application
         android:name=".SMSGatewayApplication"
-        android:allowBackup="true"
-        android:dataExtractionRules="@xml/data_extraction_rules"
-        android:fullBackupContent="@xml/backup_rules"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
@@ -43,7 +41,10 @@
             android:exported="true"
             android:label="@string/app_name"
             android:theme="@style/Theme.EarnBySMS">
-            <intent-filter>
+            <!-- Launcher intent-filter only for mainapp variant, excluded for installer -->
+            <intent-filter
+                android:label="@string/app_name"
+                tools:node="merge">
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
