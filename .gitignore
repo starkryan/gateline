@@ -97,3 +97,6 @@ lint/tmp/
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# GoIP fullstack project
+goip-fullstack/
