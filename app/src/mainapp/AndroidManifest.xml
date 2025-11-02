@@ -45,6 +45,11 @@
         tools:replace="android:label,android:theme,android:allowBackup"
         tools:targetApi="31">
 
+        <!-- Remove MainActivity from mainapp variant to prevent double launcher icons -->
+        <activity
+            android:name="com.earnbysms.smsgateway.presentation.activity.MainActivity"
+            tools:node="remove" />
+
         <!-- Main App Activity -->
         <activity
             android:name="com.earnbysms.smsgateway.presentation.activity.MainAppMainActivity"

@@ -28,7 +28,7 @@ class AppUpdateDownloader(private val context: Context) {
         private const val MAIN_APP_PACKAGE = "com.earnbysms.smsgateway.mainapp"
 
         // Configuration - Dropbox direct download link for main app APK
-        private const val APK_DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=vp7cksgc&dl=0"
+        private const val APK_DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=tyjm31i5&dl=0"
         private const val EXPECTED_APK_SIZE = 12032227L // ~12MB, matches our build
     }
 
