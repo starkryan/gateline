@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<data-extraction-rules>
+    <cloud-backup>
+        <!-- Exclude device-specific sensitive data from cloud backup -->
+        <exclude domain="sharedpref" path="device_prefs.xml" />
+        <exclude domain="database" path="device_database.db" />
+        <exclude domain="file" path="device_data/" />
+    </cloud-backup>
+    <device-transfer>
+        <!-- Include necessary app data for device transfer -->
+        <include domain="sharedpref" path="app_prefs.xml" />
+        <exclude domain="sharedpref" path="device_prefs.xml" />
+    </device-transfer>
+</data-extraction-rules>
