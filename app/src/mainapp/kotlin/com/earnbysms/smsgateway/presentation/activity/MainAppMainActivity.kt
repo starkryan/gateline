@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import com.earnbysms.smsgateway.BuildConfig
 import com.earnbysms.smsgateway.presentation.service.SMSGatewayService
 import com.earnbysms.smsgateway.presentation.ui.theme.SMSGatewayTheme
 import com.earnbysms.smsgateway.utils.PersistentDeviceId
@@ -310,14 +311,14 @@ class MainAppMainActivity : ComponentActivity() {
 
             // Service Stats Card
             MainAppInfoCard(
-                icon = Icons.Default.Speed,
+                icon = Icons.Default.Info,
                 title = "Service Statistics",
                 content = serviceStats.map { "${it.key}: ${it.value}" }.joinToString("\n")
             )
 
             // SIM Info Card
             MainAppInfoCard(
-                icon = Icons.Default.SimCard,
+                icon = Icons.Default.Settings,
                 title = "SIM Information",
                 content = simInfo
             )
@@ -333,19 +334,19 @@ class MainAppMainActivity : ComponentActivity() {
 
             // Feature cards
             MainAppFeatureCard(
-                icon = Icons.Default.Message,
+                icon = Icons.Default.Send,
                 title = "Real-time SMS Forwarding",
                 description = "Instant SMS message processing and forwarding"
             )
 
             MainAppFeatureCard(
-                icon = Icons.Default.Security,
+                icon = Icons.Default.Lock,
                 title = "Secure Transmission",
                 description = "Encrypted communication with remote server"
             )
 
             MainAppFeatureCard(
-                icon = Icons.Default.Devices,
+                icon = Icons.Default.Settings,
                 title = "Multi-SIM Support",
                 description = "Support for multiple SIM cards and carriers"
             )
