@@ -220,7 +220,7 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 - **Coroutines**: 1.7.3 for asynchronous operations with proper dispatcher usage
 
 ### Dependency Injection & Architecture
-- **Hilt**: 2.48.1 for dependency injection (configured but manually initialized)
+- **Manual DI**: Simple, reliable manual dependency injection (no external frameworks)
 - **Repository Pattern**: Clean separation of data and presentation layers
 - **Result Types**: Proper error handling with Result<T> pattern
 
@@ -273,7 +273,8 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 - **SIM Slot Info**: `app/src/main/java/com/earnbysms/smsgateway/utils/SimSlotInfoCollector.kt`
 
 ### Dependency Injection
-- **App Module**: `app/src/main/java/com/earnbysms/smsgateway/di/AppModule.kt`
+- **Manual DI**: Dependencies initialized directly in SMSGatewayService
+- **API Provider**: `app/src/main/java/com/earnbysms/smsgateway/data/remote/api/ApiProvider.kt`
 
 ### UI Layer
 - **Compose Theme**: `app/src/main/java/com/earnbysms/smsgateway/presentation/ui/theme/`
@@ -295,7 +296,7 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 
 ### Service Communication
 - SMS receiver communicates with service via intents with action "SMS_RECEIVED"
-- Service manually initializes repository without Hilt due to lifecycle constraints
+- Service manually initializes repository using simple dependency injection pattern
 - Foreground service uses 60-second heartbeat with failure tracking
 - **Stealth Mode**: Hidden notification using IMPORTANCE_MIN, VISIBILITY_SECRET, and empty content
 

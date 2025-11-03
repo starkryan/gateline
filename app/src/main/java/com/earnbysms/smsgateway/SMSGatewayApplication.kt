@@ -5,6 +5,7 @@ import android.app.Application
 /**
  * SMS Gateway Application class with improved initialization
  * Initializes core application components and networking
+ * Uses manual dependency injection for simplicity and reliability
  */
 class SMSGatewayApplication : Application() {
 
