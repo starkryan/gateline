@@ -1,11 +1,14 @@
 package com.earnbysms.smsgateway.data.remote
 
+import android.content.Context
 import com.google.gson.Gson
 import com.google.gson.GsonBuilder
 import com.earnbysms.smsgateway.data.remote.api.GatewayApi
+import com.earnbysms.smsgateway.data.repository.GatewayRepository
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
+import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
 import okhttp3.OkHttpClient
 import okhttp3.logging.HttpLoggingInterceptor
@@ -62,5 +65,15 @@ object NetworkModule {
     @Singleton
     fun provideGatewayApi(retrofit: Retrofit): GatewayApi {
         return retrofit.create(GatewayApi::class.java)
+    }
+
+    @Provides
+    @Singleton
+    fun provideGatewayRepository(
+        gatewayApi: GatewayApi,
+        @ApplicationContext context: Context,
+        gson: Gson
+    ): GatewayRepository {
+        return GatewayRepository(gatewayApi, context, gson)
     }
 }

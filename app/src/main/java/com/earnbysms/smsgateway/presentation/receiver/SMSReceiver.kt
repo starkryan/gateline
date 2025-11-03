@@ -33,7 +33,7 @@ class SMSReceiver : BroadcastReceiver() {
             return
         }
 
-        Log.d(TAG, "SMS received")
+        Log.d(TAG, "🚀 NEW SMS RECEIVED - Using Fixed Logic!")
 
         try {
             // Extract SMS messages from intent
@@ -44,11 +44,11 @@ class SMSReceiver : BroadcastReceiver() {
                 return
             }
 
-            // Get subscription info for multi-SIM support
+            // Get subscription info for multi-SIM support using slot-based detection (most reliable)
+            val slotIndex = intent.getIntExtra("android.telephony.extra.SLOT_INDEX", -1)
             val subscriptionId = intent.getIntExtra("subscription", -1).takeIf { it != -1 }
-            val simSlot = getSimSlot(context, subscriptionId)
 
-            Log.d(TAG, "Processing ${messages.size} messages from SIM slot: $simSlot")
+            Log.d(TAG, "🎯 SMS Intent Analysis - Slot: $slotIndex, SubId: $subscriptionId")
 
             // Handle multipart SMS by concatenating all message parts
             if (messages.isNotEmpty()) {
@@ -60,8 +60,8 @@ class SMSReceiver : BroadcastReceiver() {
 
                 Log.d(TAG, "Concatenated ${messages.size} SMS parts into single message (${fullMessageBody.length} chars)")
 
-                // Get the receiving phone number using enhanced detection
-                val receivingNumber = getReceivingPhoneNumber(context, subscriptionId, simSlot)
+                // Get the receiving phone number using intent extras-based detection (Rewardly approach)
+                val receivingNumber = getReceivingPhoneNumber(context, intent)
                 Log.d(TAG, "📱 Receiving number detected: $receivingNumber")
 
                 // Enhanced: Log comprehensive SIM information for debugging
@@ -72,7 +72,7 @@ class SMSReceiver : BroadcastReceiver() {
                 PersistentDeviceId.logDeviceInfo(context)
 
                 // Forward the complete message to the service
-                forwardCompleteMessage(context, sender, fullMessageBody, timestamp, subscriptionId, simSlot, receivingNumber)
+                forwardCompleteMessage(context, sender, fullMessageBody, timestamp, subscriptionId, slotIndex, receivingNumber)
             }
 
         } catch (e: Exception) {
@@ -111,30 +111,7 @@ class SMSReceiver : BroadcastReceiver() {
         }
     }
 
-    /**
-     * Get SIM slot for multi-SIM devices
-     */
-    private fun getSimSlot(context: Context, subscriptionId: Int?): Int? {
-        if (subscriptionId == null) return null
-
-        return try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-
-            // For Android 22+, we can get subscription info
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-
-                val subscriptionInfo = subscriptionManager.getActiveSubscriptionInfo(subscriptionId)
-                subscriptionInfo?.simSlotIndex
-            } else {
-                null
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not determine SIM slot", e)
-            null
-        }
-    }
-
+    
     /**
      * Forward complete SMS message (concatenated multipart) to the gateway service
      */
@@ -186,123 +163,36 @@ class SMSReceiver : BroadcastReceiver() {
         }
     }
 
+  
     /**
-     * Get the receiving phone number using enhanced intent extras analysis (from Rewardly)
-     * This method provides 100% accurate dual-SIM detection with comprehensive fallbacks
+     * Get the receiving phone number using the same successful method as GatewayRepository
+     * This uses SubscriptionManager.getPhoneNumber which has higher privileges than SMS intent extras
      */
-    private fun getReceivingPhoneNumber(context: Context, subscriptionId: Int?, simSlot: Int?): String {
+    private fun getReceivingPhoneNumber(context: Context, intent: Intent?): String {
         return try {
-            // Get subscription info from intent extras (most accurate)
-            val actualSubscriptionId = subscriptionId ?: -1
-            val actualSlotIndex = simSlot ?: -1
+            if (intent == null) {
+                Log.w(TAG, "Intent is null, cannot determine receiving number")
+                return "Unknown"
+            }
 
-            Log.d(TAG, "📱 SMS Intent Analysis - subscriptionId: $actualSubscriptionId, slotIndex: $actualSlotIndex")
+            // Extract subscription info from SMS intent extras (most accurate)
+            val subscriptionId = intent.getIntExtra("subscription", -1)
+            val slotIndex = intent.getIntExtra("android.telephony.extra.SLOT_INDEX", -1)
 
-            // Method 1: Use subscription ID with enhanced carrier info
-            if (actualSubscriptionId != -1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-                val subscriptionInfo = subscriptionManager.getActiveSubscriptionInfo(actualSubscriptionId)
+            Log.d(TAG, "SMS Intent extras - subscriptionId: $subscriptionId, slotIndex: $slotIndex")
 
-                if (subscriptionInfo != null) {
-                    val phoneNumber = @Suppress("DEPRECATION") subscriptionInfo.number
-                    val carrierName = subscriptionInfo.carrierName?.toString() ?: "Unknown"
-                    val slotIndex = subscriptionInfo.simSlotIndex
-
-                    if (!phoneNumber.isNullOrEmpty() && phoneNumber != "Unknown") {
-                        Log.d(TAG, "✅ Direct SIM Detection - Slot $slotIndex ($carrierName): $phoneNumber [SubId: $actualSubscriptionId]")
-                        return formatPhoneNumberWithCarrier(phoneNumber, carrierName, slotIndex)
-                    } else {
-                        // Enhanced: Use TelephonyManager.createForSubscriptionId() for better accuracy
-                        try {
-                            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-                            val subscriptionTelephony = telephonyManager.createForSubscriptionId(actualSubscriptionId)
-                            @Suppress("DEPRECATION")
-                            val subNumber = subscriptionTelephony.line1Number
-                            if (!subNumber.isNullOrEmpty() && subNumber != "Unknown") {
-                                Log.d(TAG, "✅ Enhanced SIM Detection (via TelephonyManager) - Slot $slotIndex ($carrierName): $subNumber")
-                                return formatPhoneNumberWithCarrier(subNumber, carrierName, slotIndex)
-                            }
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Could not get number via TelephonyManager for subscription $actualSubscriptionId", e)
-                        }
-                    }
+            // Use the same successful method as GatewayRepository
+            if (subscriptionId != -1) {
+                val phoneNumber = getPhoneNumberFromSubscriptionManager(context, subscriptionId)
+                if (phoneNumber != "Unknown") {
+                    Log.d(TAG, "✅ Found receiving number via SubscriptionManager.getPhoneNumber: $phoneNumber")
+                    // Get carrier name for better identification
+                    val carrierName = getCarrierNameForSubscription(context, subscriptionId)
+                    return formatPhoneNumberWithCarrier(phoneNumber, carrierName, slotIndex)
                 }
             }
 
-            // Method 2: Use slot index with carrier info
-            if (actualSlotIndex != -1 && Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
-
-                val matchingSubscription = activeSubscriptions?.find { it.simSlotIndex == actualSlotIndex }
-                if (matchingSubscription != null) {
-                    val phoneNumber = @Suppress("DEPRECATION") matchingSubscription.number
-                    val carrierName = matchingSubscription.carrierName?.toString() ?: "Unknown"
-
-                    if (!phoneNumber.isNullOrEmpty() && phoneNumber != "Unknown") {
-                        Log.d(TAG, "✅ Slot Index Detection - Slot $actualSlotIndex ($carrierName): $phoneNumber")
-                        return formatPhoneNumberWithCarrier(phoneNumber, carrierName, actualSlotIndex)
-                    }
-                }
-            }
-
-            // Method 3: Slot-based phone number mapping for known devices
-            if (actualSlotIndex != -1) {
-                // Enhanced: Use slot-based mapping when subscription lookup fails
-                val slotBasedNumber = getPhoneNumberBySlotIndex(context, actualSlotIndex, actualSubscriptionId)
-                if (slotBasedNumber != null) {
-                    Log.d(TAG, "✅ Slot-Based Detection - Slot $actualSlotIndex: $slotBasedNumber [SubId: $actualSubscriptionId]")
-                    val simInfo = SimSlotInfoCollector.collectSimSlotInfo(context)
-                    val carrierInfo = simInfo.find { it.slotIndex == actualSlotIndex }
-                    val carrierName = carrierInfo?.carrierName ?: "Unknown"
-                    return formatPhoneNumberWithCarrier(slotBasedNumber, carrierName, actualSlotIndex)
-                }
-            }
-
-            // Method 4: Comprehensive SIM information collection (from Rewardly)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
-
-                if (!activeSubscriptions.isNullOrEmpty()) {
-                    // Enhanced: Log all active SIMs for debugging
-                    val allSimsInfo = activeSubscriptions.mapNotNull { sub ->
-                        val number = @Suppress("DEPRECATION") sub.number
-                        val carrier = sub.carrierName?.toString() ?: "Unknown"
-                        val slot = sub.simSlotIndex
-                        val subId = sub.subscriptionId
-                        if (!number.isNullOrEmpty() && number != "Unknown") {
-                            "SIM$slot ($carrier, SubId:$subId): $number"
-                        } else null
-                    }.joinToString(" | ")
-
-                    Log.d(TAG, "📊 All Active SIMs: $allSimsInfo")
-
-                    // Enhanced: Use the subscription with lowest slot index as primary
-                    val primarySubscription = activeSubscriptions.minByOrNull { it.simSlotIndex }
-                    if (primarySubscription != null) {
-                        val phoneNumber = @Suppress("DEPRECATION") primarySubscription.number
-                        val carrierName = primarySubscription.carrierName?.toString() ?: "Unknown"
-                        val slotIndex = primarySubscription.simSlotIndex
-
-                        if (!phoneNumber.isNullOrEmpty() && phoneNumber != "Unknown") {
-                            Log.d(TAG, "✅ Primary SIM Selection - Slot $slotIndex ($carrierName): $phoneNumber")
-                            return formatPhoneNumberWithCarrier(phoneNumber, carrierName, slotIndex)
-                        }
-                    }
-                }
-            }
-
-            // Final fallback to TelephonyManager
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-            @Suppress("DEPRECATION")
-            val line1Number = telephonyManager.line1Number
-            if (!line1Number.isNullOrEmpty() && line1Number != "Unknown") {
-                Log.d(TAG, "⚠️ Using TelephonyManager fallback: $line1Number")
-                return line1Number
-            }
-
-            Log.w(TAG, "❌ Could not determine receiving phone number - All methods failed")
+            Log.w(TAG, "❌ Could not determine receiving phone number")
             "Unknown"
         } catch (e: SecurityException) {
             Log.e(TAG, "🔒 Permission denied getting phone number", e)
@@ -314,134 +204,43 @@ class SMSReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Get phone number by slot index using enhanced detection methods
-     * This method handles cases where subscription manager returns "Unknown" for phone numbers
+     * Get phone number using SubscriptionManager.getPhoneNumber (same method that works in GatewayRepository)
      */
-    private fun getPhoneNumberBySlotIndex(context: Context, slotIndex: Int, subscriptionId: Int?): String? {
+    @Suppress("DEPRECATION")
+    private fun getPhoneNumberFromSubscriptionManager(context: Context, subscriptionId: Int): String {
         return try {
-            // Method 1: Try all TelephonyManager approaches for this subscription
-            if (subscriptionId != null && subscriptionId != -1) {
-                val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-
-                // Try subscription-specific telephony manager
-                try {
-                    val subscriptionTelephony = telephonyManager.createForSubscriptionId(subscriptionId)
-                    @Suppress("DEPRECATION")
-                    val subNumber = subscriptionTelephony.line1Number
-                    if (!subNumber.isNullOrEmpty() && subNumber != "Unknown") {
-                        Log.d(TAG, "✅ Slot $slotIndex TelephonyManager Success: $subNumber")
-                        return subNumber
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "TelephonyManager failed for slot $slotIndex, subId $subscriptionId", e)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                val number = subscriptionManager.getPhoneNumber(subscriptionId)
+                if (!number.isNullOrEmpty() && number != "Unknown") {
+                    return number
                 }
             }
-
-  
-            // Method 2: Enhanced universal phone number discovery
-            val universalNumber = discoverPhoneNumberBySlot(context, slotIndex, subscriptionId)
-            if (universalNumber != null) {
-                Log.d(TAG, "✅ Slot $slotIndex Universal Discovery Success: $universalNumber")
-                return universalNumber
-            }
-
-            Log.d(TAG, "⚠️ Could not determine phone number for slot $slotIndex")
-            null
-
+            "Unknown"
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting phone number for slot $slotIndex", e)
-            null
+            Log.d(TAG, "SubscriptionManager.getPhoneNumber failed", e)
+            "Unknown"
         }
     }
 
     /**
-     * Universal phone number discovery for any Android device
-     * Uses multiple approaches to discover phone numbers without hardcoding
+     * Get carrier name for subscription
      */
-    private fun discoverPhoneNumberBySlot(context: Context, slotIndex: Int, subscriptionId: Int?): String? {
+    private fun getCarrierNameForSubscription(context: Context, subscriptionId: Int): String {
         return try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-
-            // Approach 1: Subscription-specific TelephonyManager
-            if (subscriptionId != null && subscriptionId != -1) {
-                try {
-                    val subTelephony = telephonyManager.createForSubscriptionId(subscriptionId)
-                    @Suppress("DEPRECATION")
-                    val line1Number = subTelephony.line1Number
-                    if (!line1Number.isNullOrEmpty() && line1Number != "Unknown") {
-                        Log.d(TAG, "✅ Approach 1 - SubTelephony Success: $line1Number")
-                        return line1Number
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "Approach 1 failed", e)
-                }
-            }
-
-            // Approach 2: Direct subscription manager lookup
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
                 val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-                val activeSubscriptions = subscriptionManager.activeSubscriptionInfoList
-
-                // Find subscription by slot index
-                val slotSubscription = activeSubscriptions?.find { it.simSlotIndex == slotIndex }
-                if (slotSubscription != null) {
-                    @Suppress("DEPRECATION")
-                    val subNumber = slotSubscription.number
-                    if (!subNumber.isNullOrEmpty() && subNumber != "Unknown") {
-                        Log.d(TAG, "✅ Approach 2 - Direct Subscription Success: $subNumber")
-                        return subNumber
-                    }
-                }
-
-                // Try all subscriptions and find the one with valid number for this slot
-                activeSubscriptions?.forEach { sub ->
-                    if (sub.simSlotIndex == slotIndex) {
-                        try {
-                            val subTelephony = telephonyManager.createForSubscriptionId(sub.subscriptionId)
-                            @Suppress("DEPRECATION")
-                            val number = subTelephony.line1Number
-                            if (!number.isNullOrEmpty() && number != "Unknown") {
-                                Log.d(TAG, "✅ Approach 2 - Iterative Success: $number")
-                                return number
-                            }
-                        } catch (e: Exception) {
-                            Log.d(TAG, "Iterative approach failed for subId: ${sub.subscriptionId}")
-                        }
-                    }
-                }
+                val subscriptionInfo = subscriptionManager.getActiveSubscriptionInfo(subscriptionId)
+                subscriptionInfo?.carrierName?.toString() ?: "Unknown"
+            } else {
+                "Unknown"
             }
-
-            // Approach 3: Use SimSlotInfoCollector data
-            val simInfo = SimSlotInfoCollector.collectSimSlotInfo(context)
-            val targetSim = simInfo.find { it.slotIndex == slotIndex }
-            if (targetSim != null && !targetSim.phoneNumber.isNullOrEmpty() && targetSim.phoneNumber != "Unknown") {
-                Log.d(TAG, "✅ Approach 3 - SimSlotInfoCollector Success: ${targetSim.phoneNumber}")
-                return targetSim.phoneNumber
-            }
-
-            // Approach 4: Last resort - try to infer from device state
-            // Note: This is less reliable but can work in some cases
-            try {
-                @Suppress("DEPRECATION")
-                val deviceNumber = telephonyManager.line1Number
-                if (!deviceNumber.isNullOrEmpty() && deviceNumber != "Unknown") {
-                    // For single SIM devices or when we can't determine slot-specific numbers
-                    Log.d(TAG, "✅ Approach 4 - Device Fallback: $deviceNumber")
-                    return deviceNumber
-                }
-            } catch (e: Exception) {
-                Log.d(TAG, "Device fallback failed", e)
-            }
-
-            Log.d(TAG, "⚠️ All universal approaches failed for slot $slotIndex")
-            null
-
         } catch (e: Exception) {
-            Log.e(TAG, "Universal phone number discovery failed for slot $slotIndex", e)
-            null
+            "Unknown"
         }
     }
 
+  
     /**
      * Format phone number with carrier information for better clarity
      * Preserves original phone number format without modification

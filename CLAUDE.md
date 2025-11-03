@@ -149,6 +149,26 @@ The app provides comprehensive multi-SIM support:
 - **Data Encryption**: Room database encryption capabilities for sensitive data
 - **Root Detection**: Built-in security checks to prevent execution on rooted devices
 
+### Stealth Mode Implementation
+The app implements several stealth techniques to minimize visibility:
+
+**Notification Hiding**:
+- Uses `NotificationManager.IMPORTANCE_MIN` for lowest priority
+- Empty title and text content to avoid displaying information
+- `VISIBILITY_SECRET` to hide from lock screen
+- No sound, vibration, or lights
+- System icon instead of app icon to blend in
+
+**Channel Configuration**:
+- Channel named "System Service" instead of "SMS Gateway"
+- No badge display or visual indicators
+- Silent operation with no user interruptions
+
+**Service Behavior**:
+- Foreground service type "dataSync|connectedDevice" for Android 15 compliance
+- Minimal resource footprint and battery usage
+- Background operation with no visible UI elements
+
 ## Foreground Service Implementation
 
 ### Android 15 Compliance
@@ -156,7 +176,7 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 
 ### Service Lifecycle
 - **Start**: Manual start from MainActivity + auto-start on boot via BootReceiver
-- **Notification**: Persistent notification showing service status, uptime, and message count
+- **Stealth Notification**: Hidden notification with minimal visibility (IMPORTANCE_MIN, empty title/text)
 - **Timeout Handling**: Graceful restart mechanism for 6-hour Android service limits
 - **Resource Management**: Proper coroutine cancellation and resource cleanup
 
@@ -277,6 +297,7 @@ The SMSGatewayService uses `foregroundServiceType="dataSync|connectedDevice"` to
 - SMS receiver communicates with service via intents with action "SMS_RECEIVED"
 - Service manually initializes repository without Hilt due to lifecycle constraints
 - Foreground service uses 60-second heartbeat with failure tracking
+- **Stealth Mode**: Hidden notification using IMPORTANCE_MIN, VISIBILITY_SECRET, and empty content
 
 ### Permission Handling
 - SMS permissions require user approval on Android 6.0+

@@ -87,11 +87,26 @@
     @com.google.gson.annotations.SerializedName <fields>;
 }
 
-# Preserve generic type information for Gson
+# Preserve generic type information for Gson and Retrofit
 -keepattributes Signature
+-keepattributes *Annotation*, EnclosingMethod, InnerClasses
 -keepclassmembers,allowshrinking,allowobfuscation class * {
     <init>(...);
 }
+
+# Keep all generic type information for Retrofit
+-keep,allowshrinking,allowobfuscation class * {
+    *** <methods>;
+}
+-keep,allowshrinking,allowobfuscation interface * {
+    *** <methods>;
+}
+
+# Preserve Retrofit's generic type handling
+-keepclassmembers class * {
+    @retrofit2.http.* <methods>;
+}
+-dontnote retrofit2.internal.Platform#defaultConverters
 
 # ====================================================================
 # EARN BY SMS APP SPECIFIC PROTECTION

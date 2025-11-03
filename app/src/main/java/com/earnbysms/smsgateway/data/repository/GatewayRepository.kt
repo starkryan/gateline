@@ -247,126 +247,62 @@ class GatewayRepository(
     }
 
     /**
-     * Get phone number from multiple sources
+     * Get phone number using intent extras and SubscriptionManager like Rewardly app
+     * This is the simplified and most reliable approach based on Rewardly app success
      */
     @Suppress("DEPRECATION")
     private fun getPhoneNumberFromMultipleSources(subscriptionId: Int, carrierName: String?): String {
-        val results = mutableListOf<String>()
+        return try {
+            // Method 1: Try SubscriptionManager.getPhoneNumber (Android 5.1+)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                try {
+                    val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                    val number = subscriptionManager.getPhoneNumber(subscriptionId)
+                    if (!number.isNullOrEmpty() && number != "Unknown") {
+                        Log.d(TAG, "✅ Found phone number via SubscriptionManager.getPhoneNumber: $number")
+                        return number
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "SubscriptionManager.getPhoneNumber failed", e)
+                }
+            }
 
-        // Method 1: Try SubscriptionManager
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+            // Method 2: Try active subscription info
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
+                try {
+                    val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+                    val activeSubscriptionInfoList = subscriptionManager.activeSubscriptionInfoList
+                    val targetSubscription = activeSubscriptionInfoList?.find { it.subscriptionId == subscriptionId }
+                    if (targetSubscription?.number?.isNotEmpty() == true) {
+                        val number = targetSubscription.number.toString()
+                        Log.d(TAG, "✅ Found phone number via active subscription info: $number")
+                        return number
+                    }
+                } catch (e: Exception) {
+                    Log.d(TAG, "Active subscription info failed", e)
+                }
+            }
+
+            // Method 3: Try DeviceUtils fallback
             try {
-                val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-                val number = subscriptionManager.getPhoneNumber(subscriptionId)
-                if (!number.isNullOrEmpty()) {
-                    results.add("SubscriptionManager: $number")
-                    Log.d(TAG, "Found phone number via SubscriptionManager: $number")
+                val devicePhoneNumber = DeviceUtils.getPhoneNumber(context)
+                if (!devicePhoneNumber.isNullOrEmpty() && devicePhoneNumber != "Unknown") {
+                    Log.d(TAG, "Using DeviceUtils fallback: $devicePhoneNumber")
+                    return devicePhoneNumber
                 }
             } catch (e: Exception) {
-                Log.w(TAG, "Could not get phone number via SubscriptionManager for sub $subscriptionId", e)
+                Log.d(TAG, "DeviceUtils fallback failed", e)
             }
-        }
 
-        // Method 2: Try primary TelephonyManager line1 number
-        try {
-            val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-            val line1Number = telephonyManager.line1Number
-            if (!line1Number.isNullOrEmpty()) {
-                results.add("Line1: $line1Number")
-                Log.d(TAG, "Found phone number via TelephonyManager.line1Number: $line1Number")
-            }
+            Log.d(TAG, "Could not determine phone number for sub $subscriptionId")
+            "Unknown"
         } catch (e: Exception) {
-            Log.w(TAG, "Could not get phone number via TelephonyManager.line1Number", e)
-        }
-
-        // Method 3: Try system settings phone number
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                val settingsSecure = Settings.Secure.getString(context.contentResolver, "sim_phone_number")
-                if (!settingsSecure.isNullOrEmpty()) {
-                    results.add("Settings: $settingsSecure")
-                    Log.d(TAG, "Found phone number via Settings: $settingsSecure")
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not get phone number via Settings", e)
-        }
-
-        // Method 4: Try DeviceUtils if available
-        try {
-            val devicePhoneNumber = DeviceUtils.getPhoneNumber(context)
-            if (!devicePhoneNumber.isNullOrEmpty() && devicePhoneNumber != "Unknown") {
-                results.add("DeviceUtils: $devicePhoneNumber")
-                Log.d(TAG, "Found phone number via DeviceUtils: $devicePhoneNumber")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not get phone number via DeviceUtils", e)
-        }
-
-        // Method 5: Try carrier-specific detection for known carriers
-        try {
-            val carrierSpecificNumber = detectCarrierPhoneNumber(carrierName, subscriptionId)
-            if (!carrierSpecificNumber.isNullOrEmpty()) {
-                results.add("Carrier: $carrierSpecificNumber")
-                Log.d(TAG, "Found phone number via carrier detection: $carrierSpecificNumber")
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Could not get phone number via carrier detection", e)
-        }
-
-        // Log all attempts for debugging
-        Log.d(TAG, "Phone number detection results for sub $subscriptionId (${carrierName ?: "Unknown"}): ${results.joinToString(", ")}")
-
-        // Return the first valid number found
-        return results.firstOrNull()?.split(": ")?.getOrNull(1) ?: ""
-    }
-
-    /**
-     * Detect phone number using carrier-specific methods
-     */
-    private fun detectCarrierPhoneNumber(carrierName: String?, subscriptionId: Int): String {
-        return try {
-            when {
-                !carrierName.isNullOrBlank() && carrierName.lowercase().contains("jio") -> {
-                    // For Jio, phone numbers often follow pattern +91 followed by 10 digits
-                    val jioPattern = "+91[0-9]{10}"
-                    return tryAllPhoneNumbers(jioPattern)
-                }
-                !carrierName.isNullOrBlank() && carrierName.lowercase().contains("airtel") -> {
-                    // For Airtel, phone numbers often follow pattern +91 followed by 10 digits
-                    val airtelPattern = "+91[0-9]{10}"
-                    return tryAllPhoneNumbers(airtelPattern)
-                }
-                !carrierName.isNullOrBlank() && carrierName.lowercase().contains("vi") -> {
-                    // For VI, phone numbers often follow pattern +91 followed by 10 digits
-                    val viPattern = "+91[0-9]{10}"
-                    return tryAllPhoneNumbers(viPattern)
-                }
-                else -> {
-                    // Generic pattern for Indian mobile numbers
-                    val genericPattern = "+[0-9]{6,15}"
-                    return tryAllPhoneNumbers(genericPattern)
-                }
-            }
-        } catch (e: Exception) {
-            Log.w(TAG, "Carrier-specific phone number detection failed", e)
-            ""
+            Log.e(TAG, "Error getting phone number for sub $subscriptionId", e)
+            "Unknown"
         }
     }
 
-    /**
-     * Try all phone numbers matching the pattern and return the first one
-     */
-    private fun tryAllPhoneNumbers(pattern: String): String {
-        // This is a placeholder - in a real implementation, you would:
-        // 1. Query the device's contact list for numbers matching the carrier
-        // 2. Check device storage for configuration files with phone numbers
-        // 3. Use other device-specific APIs
-
-        // For now, return empty to indicate carrier-specific detection not implemented
-        Log.d(TAG, "Carrier-specific phone number pattern: $pattern")
-        return ""
-    }
+  
 
     /**
      * Get phone number for specific subscription slot (legacy method)

