@@ -56,7 +56,7 @@
             android:name="com.earnbysms.smsgateway.presentation.service.SMSGatewayService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|connectedDevice" />
+            android:foregroundServiceType="dataSync" />
 
         <!-- SMS BroadcastReceiver -->
         <receiver

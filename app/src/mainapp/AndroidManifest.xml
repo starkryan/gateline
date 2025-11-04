@@ -12,7 +12,6 @@
 
     <!-- Foreground Service Permissions (Android 15 Compliant) -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
 
     <!-- Network and Device Permissions -->
     <uses-permission android:name="android.permission.INTERNET" />
@@ -68,7 +67,7 @@
             android:name="com.earnbysms.smsgateway.presentation.service.SMSGatewayService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|connectedDevice" />
+            android:foregroundServiceType="dataSync" />
 
         <!-- SMS BroadcastReceiver -->
         <receiver
