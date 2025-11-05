@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
+import android.provider.Settings
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import androidx.lifecycle.lifecycleScope
@@ -30,13 +31,15 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.IntentFilter
 import androidx.core.content.FileProvider
+import android.os.Build
 
 class InstallerMainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "InstallerMainActivity"
-        private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=tyjm31i5&dl=1"
+        private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/tz4a2ok7p0o9wihm59a1c/app-mainapp-debug.apk?rlkey=w6s6xv3m1rtv41i11ansjk9b2&st=sezlr3je&dl=1"
         private const val APK_FILE_NAME = "sms-gateway-latest.apk"
+        private const val REQUEST_CODE_INSTALL_PERMISSION = 1001
     }
 
     private var isDownloading = mutableStateOf(false)
@@ -44,6 +47,7 @@ class InstallerMainActivity : ComponentActivity() {
     private var downloadedFile: File? = null
     private var isInstalling = mutableStateOf(false)
     private var installationCompleted = mutableStateOf(false)
+    private var needsPermission = mutableStateOf(false)
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -55,18 +59,27 @@ class InstallerMainActivity : ComponentActivity() {
     }
 
     private var downloadId: Long = -1L
+    private var nextActionAfterPermission: String = "" // "download" or "install"
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        checkAndRequestPermissions()
+        checkInstallPermission()
 
         // Register download receiver
-        registerReceiver(
-            downloadReceiver,
-            IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
-        )
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(
+                downloadReceiver,
+                IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE),
+                Context.RECEIVER_NOT_EXPORTED
+            )
+        } else {
+            registerReceiver(
+                downloadReceiver,
+                IntentFilter(DownloadManager.ACTION_DOWNLOAD_COMPLETE)
+            )
+        }
 
         setContent {
             SMSGatewayTheme {
@@ -77,12 +90,57 @@ class InstallerMainActivity : ComponentActivity() {
 
     override fun onDestroy() {
         super.onDestroy()
-        unregisterReceiver(downloadReceiver)
+        try {
+            unregisterReceiver(downloadReceiver)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering receiver", e)
+        }
     }
 
-    private fun checkAndRequestPermissions() {
-        // No phone permissions required for installer variant
-        Log.d(TAG, "Installer variant - no sensitive permissions required")
+    private fun checkInstallPermission() {
+        needsPermission.value = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            !packageManager.canRequestPackageInstalls()
+        } else {
+            false
+        }
+        Log.d(TAG, "Install permission needed: ${needsPermission.value}")
+    }
+
+    private fun requestInstallPermission() {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Log.d(TAG, "Requesting install permission for Android 8+")
+                val intent = Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES)
+                intent.data = Uri.parse("package:$packageName")
+                startActivityForResult(intent, REQUEST_CODE_INSTALL_PERMISSION)
+            } else {
+                Log.d(TAG, "No permission needed for Android < 8")
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error requesting install permission", e)
+            val intent = Intent(Settings.ACTION_SECURITY_SETTINGS)
+            startActivity(intent)
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        when (requestCode) {
+            REQUEST_CODE_INSTALL_PERMISSION -> {
+                checkInstallPermission()
+                if (!needsPermission.value) {
+                    // Permission granted, execute the stored action
+                    when (nextActionAfterPermission) {
+                        "download" -> startDownload()
+                        "install" -> proceedWithInstallation()
+                        else -> Log.w(TAG, "No action specified after permission grant")
+                    }
+                    nextActionAfterPermission = "" // Reset action
+                } else {
+                    Log.w(TAG, "Install permission still not granted")
+                }
+            }
+        }
     }
 
     @OptIn(ExperimentalMaterial3Api::class)
@@ -128,6 +186,35 @@ class InstallerMainActivity : ComponentActivity() {
                 )
 
                 when {
+                    needsPermission.value -> {
+                        Text(
+                            text = "Permission Required",
+                            style = MaterialTheme.typography.bodyLarge,
+                            color = MaterialTheme.colorScheme.error,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Text(
+                            text = "Please allow installation from unknown sources",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+
+                        Button(
+                            onClick = { requestInstallPermission() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Settings,
+                                contentDescription = null,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Enable Permission")
+                        }
+                    }
+
                     isDownloading.value -> {
                         Text(
                             text = "Downloading... ${downloadProgress.value.toInt()}%",
@@ -137,7 +224,7 @@ class InstallerMainActivity : ComponentActivity() {
                         )
 
                         LinearProgressIndicator(
-                            progress = downloadProgress.value,
+                            progress = downloadProgress.value / 100f,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(8.dp)
@@ -185,7 +272,12 @@ class InstallerMainActivity : ComponentActivity() {
 
                         Button(
                             onClick = {
-                                startDownload()
+                                if (needsPermission.value) {
+                                    nextActionAfterPermission = "download"
+                                    requestInstallPermission()
+                                } else {
+                                    startDownload()
+                                }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
@@ -204,6 +296,24 @@ class InstallerMainActivity : ComponentActivity() {
     }
 
     private fun startDownload() {
+        // Check installation permission first for Android 8+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            if (!packageManager.canRequestPackageInstalls()) {
+                Log.w(TAG, "Cannot download - install permission not granted")
+                needsPermission.value = true
+                android.widget.Toast.makeText(
+                    this,
+                    "Please enable permission to install unknown apps first",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+        }
+
+        proceedWithDownload()
+    }
+
+    private fun proceedWithDownload() {
         try {
             Log.d(TAG, "Starting download of main app APK")
 
@@ -212,8 +322,7 @@ class InstallerMainActivity : ComponentActivity() {
                 .setTitle("SMS Gateway Update")
                 .setDescription("Downloading latest version of SMS Gateway")
                 .setMimeType("application/vnd.android.package-archive")
-                .setDestinationInExternalFilesDir(
-                    this,
+                .setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
                     APK_FILE_NAME
                 )
@@ -223,7 +332,6 @@ class InstallerMainActivity : ComponentActivity() {
             isDownloading.value = true
             downloadProgress.value = 0f
 
-            // Monitor download progress
             lifecycleScope.launch {
                 monitorDownloadProgress()
             }
@@ -240,19 +348,43 @@ class InstallerMainActivity : ComponentActivity() {
     }
 
     private suspend fun monitorDownloadProgress() {
-        // Simple simulation for demo purposes
-        // In a real implementation, you would use DownloadManager.Query
-        var progress = 0f
-        while (isDownloading.value && progress < 95f) {
+        val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
+        var downloading = true
+
+        while (downloading && isDownloading.value) {
+            val query = DownloadManager.Query().setFilterById(downloadId)
+            val cursor = downloadManager.query(query)
+
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val bytesDownloaded = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_BYTES_DOWNLOADED_SO_FAR))
+                    val bytesTotal = it.getLong(it.getColumnIndexOrThrow(DownloadManager.COLUMN_TOTAL_SIZE_BYTES))
+                    val status = it.getInt(it.getColumnIndexOrThrow(DownloadManager.COLUMN_STATUS))
+
+                    if (bytesTotal > 0) {
+                        val progress = ((bytesDownloaded * 100f) / bytesTotal)
+                        downloadProgress.value = progress.coerceIn(0f, 100f)
+                    }
+
+                    if (status == DownloadManager.STATUS_SUCCESSFUL) {
+                        downloading = false
+                        // Handle successful download completion
+                        handleDownloadComplete()
+                    } else if (status == DownloadManager.STATUS_FAILED) {
+                        downloading = false
+                        Log.e(TAG, "Download failed")
+                        isDownloading.value = false
+                    }
+                }
+            }
+
             delay(500)
-            progress += 5f
-            downloadProgress.value = progress
         }
     }
 
     private fun handleDownloadComplete() {
         try {
-            Log.d(TAG, "Download completed")
+            Log.d(TAG, "Download completed, processing...")
 
             val downloadManager = getSystemService(DOWNLOAD_SERVICE) as DownloadManager
             val query = DownloadManager.Query().setFilterById(downloadId)
@@ -260,66 +392,49 @@ class InstallerMainActivity : ComponentActivity() {
 
             cursor?.use {
                 if (it.moveToFirst()) {
-                    val status = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_STATUS))
+                    val statusIndex = it.getColumnIndex(DownloadManager.COLUMN_STATUS)
+                    val status = if (statusIndex >= 0) it.getInt(statusIndex) else -1
+
                     if (status == DownloadManager.STATUS_SUCCESSFUL) {
-                        val localUri = it.getString(it.getColumnIndex(DownloadManager.COLUMN_LOCAL_URI))
-                        val reason = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_REASON))
+                        // Get the file from the Downloads directory
+                        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+                        downloadedFile = File(downloadsDir, APK_FILE_NAME)
 
-                        Log.d(TAG, "Download status: $status, reason: $reason")
-                        Log.d(TAG, "Downloaded file URI: $localUri")
+                        Log.d(TAG, "Downloaded file path: ${downloadedFile?.absolutePath}")
+                        Log.d(TAG, "File exists: ${downloadedFile?.exists()}")
+                        Log.d(TAG, "File size: ${downloadedFile?.length()} bytes")
 
-                        // Get the actual file path from the URI
-                        val fileUri = Uri.parse(localUri)
-                        var filePath = fileUri.path
+                        if (downloadedFile?.exists() == true && downloadedFile?.length()!! > 1000000) {
+                            isDownloading.value = false
+                            downloadProgress.value = 100f
 
-                        // If the URI is a content URI, resolve it to a file path
-                        if (filePath != null && filePath.startsWith("file://")) {
-                            filePath = filePath.substring(7) // Remove "file://" prefix
-                        }
+                            android.widget.Toast.makeText(
+                                this,
+                                "Download completed! Starting installation...",
+                                android.widget.Toast.LENGTH_SHORT
+                            ).show()
 
-                        if (filePath != null) {
-                            downloadedFile = File(filePath)
-                            Log.d(TAG, "Downloaded file path: ${downloadedFile?.absolutePath}")
-                            Log.d(TAG, "Downloaded file exists: ${downloadedFile?.exists()}")
-                            Log.d(TAG, "Downloaded file size: ${downloadedFile?.length()} bytes")
-
-                            if (downloadedFile?.exists() == true && downloadedFile?.length()!! > 1000000) { // At least 1MB
-                                isDownloading.value = false
-                                downloadProgress.value = 100f
-
-                                android.widget.Toast.makeText(
-                                    this,
-                                    "Download completed! Starting installation...",
-                                    android.widget.Toast.LENGTH_SHORT
-                                ).show()
-
-                                // Automatically start installation
+                            lifecycleScope.launch {
+                                delay(500)
                                 installApp()
-                            } else {
-                                Log.e(TAG, "Downloaded file is invalid or too small")
-                                isDownloading.value = false
-                                android.widget.Toast.makeText(
-                                    this,
-                                    "Downloaded file is invalid",
-                                    android.widget.Toast.LENGTH_LONG
-                                ).show()
                             }
                         } else {
-                            Log.e(TAG, "Failed to parse download file path from URI: $localUri")
+                            Log.e(TAG, "Downloaded file is invalid or too small")
                             isDownloading.value = false
                             android.widget.Toast.makeText(
                                 this,
-                                "Failed to locate downloaded file",
+                                "Downloaded file is invalid. Please try again.",
                                 android.widget.Toast.LENGTH_LONG
                             ).show()
                         }
                     } else {
-                        val reason = it.getInt(it.getColumnIndex(DownloadManager.COLUMN_REASON))
+                        val reasonIndex = it.getColumnIndex(DownloadManager.COLUMN_REASON)
+                        val reason = if (reasonIndex >= 0) it.getInt(reasonIndex) else -1
                         Log.e(TAG, "Download failed with status: $status, reason: $reason")
                         isDownloading.value = false
                         android.widget.Toast.makeText(
                             this,
-                            "Download failed: $reason",
+                            "Download failed. Please check your internet connection.",
                             android.widget.Toast.LENGTH_LONG
                         ).show()
                     }
@@ -330,85 +445,165 @@ class InstallerMainActivity : ComponentActivity() {
             isDownloading.value = false
             android.widget.Toast.makeText(
                 this,
-                "Error completing download",
+                "Error processing download: ${e.message}",
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
     }
 
     private fun installApp() {
+        // Check install permission before attempting installation
+        if (needsPermission.value) {
+            nextActionAfterPermission = "install"
+            requestInstallPermission()
+        } else {
+            proceedWithInstallation()
+        }
+    }
+
+    private fun proceedWithInstallation() {
         try {
-            Log.d(TAG, "Starting app installation")
+            Log.d(TAG, "Starting APK installation from: ${downloadedFile?.absolutePath}")
             isInstalling.value = true
 
             val file = downloadedFile
-            if (file != null && file.exists()) {
-                Log.d(TAG, "File path: ${file.absolutePath}")
-                Log.d(TAG, "File size: ${file.length()} bytes")
-                Log.d(TAG, "File readable: ${file.canRead()}")
+            if (file == null || !file.exists()) {
+                Log.e(TAG, "APK file not found at: ${file?.absolutePath}")
+                isInstalling.value = false
+                android.widget.Toast.makeText(
+                    this,
+                    "APK file not found. Please download again.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
 
-                // Validate file size before attempting installation
-                if (file.length() < 1000000) { // Less than 1MB is likely invalid
-                    Log.e(TAG, "Downloaded file is too small: ${file.length()} bytes")
+            Log.d(TAG, "Android SDK: ${Build.VERSION.SDK_INT}, File: ${file.absolutePath}, Size: ${file.length()}")
+
+            // Validate file size
+            if (file.length() < 100000) {
+                Log.e(TAG, "Invalid APK file size: ${file.length()} bytes")
+                isInstalling.value = false
+                android.widget.Toast.makeText(
+                    this,
+                    "Invalid APK file. Please download again.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            // Check installation permission for Android 8+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                if (!packageManager.canRequestPackageInstalls()) {
+                    Log.e(TAG, "No installation permission")
+                    isInstalling.value = false
+                    needsPermission.value = true
                     android.widget.Toast.makeText(
                         this,
-                        "Downloaded file appears to be invalid (${file.length()} bytes)",
+                        "Please enable installation from unknown sources",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    return
+                }
+            }
+
+            // Create intent based on Android version
+            val intent: Intent
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                // Android 7.0+ (API 24+) - Must use FileProvider
+                Log.d(TAG, "Using FileProvider for Android 7+")
+
+                val contentUri = try {
+                    FileProvider.getUriForFile(
+                        this,
+                        "${packageName}.fileprovider",
+                        file
+                    )
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to create FileProvider URI: ${e.message}", e)
+                    isInstalling.value = false
+                    android.widget.Toast.makeText(
+                        this,
+                        "Failed to prepare installation. Error: ${e.message}",
                         android.widget.Toast.LENGTH_LONG
                     ).show()
                     return
                 }
 
-                val contentUri = FileProvider.getUriForFile(
-                    this,
-                    "${packageName}.fileprovider",
-                    file
-                )
+                Log.d(TAG, "FileProvider URI: $contentUri")
 
-                Log.d(TAG, "Content URI: $contentUri")
-
-                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                // Use ACTION_INSTALL_PACKAGE for Android 7+
+                intent = Intent(Intent.ACTION_INSTALL_PACKAGE).apply {
                     setDataAndType(contentUri, "application/vnd.android.package-archive")
-                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                }
-
-                // Verify that the package installer can handle this intent
-                val packageInstaller = packageManager.resolveActivity(installIntent, PackageManager.MATCH_DEFAULT_ONLY)
-                if (packageInstaller != null) {
-                    Log.d(TAG, "Starting installation intent")
-                    startActivity(installIntent)
-                } else {
-                    Log.e(TAG, "No package installer found to handle the intent")
-                    isInstalling.value = false
-                    android.widget.Toast.makeText(
-                        this,
-                        "Package installer not available",
-                        android.widget.Toast.LENGTH_LONG
-                    ).show()
+                    flags = Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK
+                    putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
+                    putExtra(Intent.EXTRA_RETURN_RESULT, true)
                 }
             } else {
-                Log.e(TAG, "Downloaded file not found or null")
+                // Android 6.0 and below - Use file:// URI
+                Log.d(TAG, "Using file:// URI for Android < 7")
+
+                val apkUri = Uri.fromFile(file)
+                intent = Intent(Intent.ACTION_VIEW).apply {
+                    setDataAndType(apkUri, "application/vnd.android.package-archive")
+                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                }
+            }
+
+            // Log intent details
+            Log.d(TAG, "Install Intent Action: ${intent.action}")
+            Log.d(TAG, "Install Intent Data: ${intent.data}")
+            Log.d(TAG, "Install Intent Type: ${intent.type}")
+
+            // Verify that an activity can handle this intent
+            val resolveInfo = packageManager.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY)
+
+            if (resolveInfo == null) {
+                Log.e(TAG, "No activity found to handle installation intent")
                 isInstalling.value = false
                 android.widget.Toast.makeText(
                     this,
-                    "Please download the app first",
+                    "Cannot find installer. Please install manually.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+                return
+            }
+
+            Log.d(TAG, "Installation will be handled by: ${resolveInfo.activityInfo.packageName}")
+
+            // Start installation
+            try {
+                startActivity(intent)
+                Log.d(TAG, "✅ Installation activity started successfully")
+
+                android.widget.Toast.makeText(
+                    this,
+                    "Opening installer. Please follow the prompts.",
+                    android.widget.Toast.LENGTH_LONG
+                ).show()
+
+                lifecycleScope.launch {
+                    delay(2000)
+                    isInstalling.value = false
+                }
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to start installation: ${e.message}", e)
+                isInstalling.value = false
+                android.widget.Toast.makeText(
+                    this,
+                    "Failed to start installation: ${e.message}",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
             }
-        } catch (e: IllegalArgumentException) {
-            Log.e(TAG, "FileProvider URI error", e)
-            isInstalling.value = false
-            android.widget.Toast.makeText(
-                this,
-                "File access error: ${e.message}",
-                android.widget.Toast.LENGTH_LONG
-            ).show()
+
         } catch (e: Exception) {
-            Log.e(TAG, "Error installing app", e)
+            Log.e(TAG, "Installation failed", e)
             isInstalling.value = false
             android.widget.Toast.makeText(
                 this,
-                "Installation failed: ${e.message}",
+                "Installation error: ${e.message}",
                 android.widget.Toast.LENGTH_LONG
             ).show()
         }
