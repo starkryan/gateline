@@ -32,13 +32,14 @@ import android.content.Context
 import android.content.IntentFilter
 import androidx.core.content.FileProvider
 import android.os.Build
+import java.io.FileInputStream
 
 class InstallerMainActivity : ComponentActivity() {
 
     companion object {
         private const val TAG = "InstallerMainActivity"
-        private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/tz4a2ok7p0o9wihm59a1c/app-mainapp-debug.apk?rlkey=w6s6xv3m1rtv41i11ansjk9b2&st=sezlr3je&dl=1"
-        private const val APK_FILE_NAME = "sms-gateway-latest.apk"
+        private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=am2zxju7&dl=1"
+        private const val APK_FILE_NAME = "randmonhereman.apk"
         private const val REQUEST_CODE_INSTALL_PERMISSION = 1001
     }
 
@@ -480,16 +481,75 @@ class InstallerMainActivity : ComponentActivity() {
 
             Log.d(TAG, "Android SDK: ${Build.VERSION.SDK_INT}, File: ${file.absolutePath}, Size: ${file.length()}")
 
-            // Validate file size
-            if (file.length() < 100000) {
-                Log.e(TAG, "Invalid APK file size: ${file.length()} bytes")
+            // Check if file exists and is readable
+            if (!file.exists()) {
+                Log.e(TAG, "Downloaded file does not exist: ${file.absolutePath}")
                 isInstalling.value = false
                 android.widget.Toast.makeText(
                     this,
-                    "Invalid APK file. Please download again.",
+                    "Downloaded file not found. Please try again.",
                     android.widget.Toast.LENGTH_LONG
                 ).show()
                 return
+            }
+
+            // Validate file size
+            if (file.length() < 100000) {
+                Log.e(TAG, "Invalid APK file size: ${file.length()} bytes - file is too small for a valid APK")
+
+                // Read first few bytes to check if it's HTML instead of APK
+                try {
+                    val fis = FileInputStream(file)
+                    val header = ByteArray(100)
+                    val bytesRead = fis.read(header)
+                    fis.close()
+
+                    val headerString = String(header, 0, bytesRead, Charsets.UTF_8)
+                    Log.e(TAG, "File header: $headerString")
+
+                    if (headerString.contains("<html") || headerString.contains("<!DOCTYPE")) {
+                        Log.e(TAG, "Downloaded file is HTML, not APK - URL redirection issue")
+                        android.widget.Toast.makeText(
+                            this,
+                            "Download error: Got HTML instead of APK file",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    } else {
+                        android.widget.Toast.makeText(
+                            this,
+                            "Invalid APK file size: ${file.length()} bytes. Please download again.",
+                            android.widget.Toast.LENGTH_LONG
+                        ).show()
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Failed to read file header: ${e.message}")
+                }
+
+                isInstalling.value = false
+                return
+            }
+
+            // Validate APK file signature
+            try {
+                val fis = FileInputStream(file)
+                val apkHeader = ByteArray(4)
+                fis.read(apkHeader)
+                fis.close()
+
+                // APK files start with PK (ZIP format)
+                if (apkHeader[0] != 0x50.toByte() || apkHeader[1] != 0x4B.toByte()) {
+                    Log.e(TAG, "Invalid APK file signature: ${apkHeader.contentToString()}")
+                    android.widget.Toast.makeText(
+                        this,
+                        "Invalid APK file format. File may be corrupted.",
+                        android.widget.Toast.LENGTH_LONG
+                    ).show()
+                    isInstalling.value = false
+                    return
+                }
+                Log.d(TAG, "APK file signature validated successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Failed to validate APK signature: ${e.message}")
             }
 
             // Check installation permission for Android 8+
