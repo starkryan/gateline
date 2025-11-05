@@ -24,6 +24,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
+import android.app.ActivityManager
 import com.earnbysms.smsgateway.BuildConfig
 import com.earnbysms.smsgateway.presentation.service.SMSGatewayService
 import com.earnbysms.smsgateway.presentation.ui.theme.SMSGatewayTheme
@@ -72,6 +73,69 @@ class MainAppMainActivity : ComponentActivity() {
 
         // Check and request permissions
         checkAndRequestPermissions()
+    }
+
+    // Hide from recent apps when activity loses focus
+    override fun onPause() {
+        super.onPause()
+        Log.d(TAG, "MainAppMainActivity onPause - hiding from recent apps")
+
+        // Remove from recent apps when losing focus
+        if (isFinishing) {
+            hideFromRecents()
+        }
+    }
+
+    // Override back button to prevent recent apps entry
+    override fun onBackPressed() {
+        Log.d(TAG, "MainAppMainActivity onBackPressed - moving to back")
+
+        // Move task to back instead of finishing
+        moveTaskToBack(true)
+
+        // Also remove from recent apps for complete stealth
+        hideFromRecents()
+    }
+
+    // Override user leaving activity
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        Log.d(TAG, "MainAppMainActivity onUserLeaveHint - hiding from recent apps")
+
+        // Hide from recent apps when user leaves
+        hideFromRecents()
+    }
+
+    /**
+     * Hides the activity from recent apps using appropriate method for Android version
+     */
+    private fun hideFromRecents() {
+        try {
+            when {
+                Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP -> {
+                    // Android 5.0+ - Use finishAndRemoveTask
+                    finishAndRemoveTask()
+                    Log.d(TAG, "Used finishAndRemoveTask to hide from recent apps")
+                }
+                else -> {
+                    // Pre-Android 5.0 - Use moveTaskToBack and finish
+                    moveTaskToBack(true)
+                    finish()
+                    Log.d(TAG, "Used moveTaskToBack and finish to hide from recent apps")
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error hiding from recent apps", e)
+
+            // Fallback method
+            try {
+                moveTaskToBack(true)
+                finish()
+                Log.d(TAG, "Used fallback method to hide from recent apps")
+            } catch (fallbackException: Exception) {
+                Log.e(TAG, "Fallback method also failed", fallbackException)
+            }
+        }
     }
 
     private fun hasAllCriticalPermissions(): Boolean {
